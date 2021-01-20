@@ -1,0 +1,54 @@
+# optimizer
+learning_rate: 0.001
+patience: 1 #80 # wait how many epochs without updating will adjust the learning rate
+decay_factor: 0.3 # how many percent decrease for the learning rate each time
+weight_decay: 0.00005
+
+# general parameters
+gradient_clip_val: 100 # maximum gradient value
+seed: 42 # random seed
+gpus: 2 # how many paralleled gpu for training
+early_stopping_patience: 2 #140 # wait for how many epochs not updating before applying early stopping
+batch_size: 1 #16 # numbers of batch
+num_workers: 12 # numbers of workers for paralleled dataloader
+epochs: 1000 # maximum epochs
+load_pretrain: None # pre-trained model version number, None without loading pre-trained model
+
+# data augmentation
+aug_gain: True # use random volum adjust
+aug_channelswap: True # use channel swap
+aug_pitchShift: False # use pitch swift
+aug_freqmask: False
+
+# output
+save_path: 'logger/' # path to store the output model
+
+# dataset
+dataset_name: 'slakh' # which dataset to use: [musdb]
+data_path: '../data/slakh/midi/' # path of the dataset:
+sf2_dir: '../data/sf2/'
+target: 'bass' # which target source to train
+seq_dur: 6 # duration of each chunk
+samples_per_track: 16 #64 # how many sample per song
+use_norm: False
+n_channels: 1
+
+# preprocess
+preprocess_name: 'stft'
+n_fft: 4096
+hop_length: 1024
+sample_rate: 44100
+band_width: 16000
+
+# model_name
+model_name: 'open-unmix' # tcn / unet / open-unmix / spleeter
+kernal_size: 3 # numbers of kernal, only useful when model_name equals tcn
+n_blocks: 8 # numbers of dilated blocks, only useful when model_name equals tcn
+n_stacks: 4 # numbers of repeated blocks, only useful when model_name equals tcn
+n_features: 512 # numbers of feature bin of the input data
+loss_name: 'mse' # mse / l1
+
+# testing/eval
+eval_dir: 'eval_log/'
+
+

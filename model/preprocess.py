@@ -53,7 +53,10 @@ class STFT(nn.Module):
         stft_f = stft_f.contiguous().view(
             nb_samples, nb_channels, self.n_fft // 2 + 1, -1, 2
         )
-        return stft_f
+
+        mag_spec = stft_f.pow(2).sum(-1).pow(1 / 2.0)
+
+        return stft_f, mag_spec
 
 class vgg_mel(nn.Module):
     def __init__(self):

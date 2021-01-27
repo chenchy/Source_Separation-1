@@ -3,87 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
-class NoOp(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, x):
-        return x
-
-
-class STFT(nn.Module):
-    def __init__(
-        self,
-        n_fft=4096,
-        n_hop=1024,
-        center=False
-    ):
-        super(STFT, self).__init__()
-        self.window = nn.Parameter(
-            torch.hann_window(n_fft),
-            requires_grad=False
-        )
-        self.n_fft = n_fft
-        self.n_hop = n_hop
-        self.center = center
-
-    def forward(self, x):
-        """
-        Input: (nb_samples, nb_channels, nb_timesteps)
-        Output:(nb_samples, nb_channels, nb_bins, nb_frames, 2)
-        """
-
-        nb_samples, nb_channels, nb_timesteps = x.size()
-
-        # merge nb_samples and nb_channels for multichannel stft
-        x = x.reshape(nb_samples*nb_channels, -1)
-
-        # compute stft with parameters as close as possible scipy settings
-        stft_f = torch.stft(
-            x,
-            n_fft=self.n_fft, hop_length=self.n_hop,
-            window=self.window, center=self.center,
-            normalized=False, onesided=True,
-            pad_mode='reflect'
-        )
-
-        # reshape back to channel dimension
-        stft_f = stft_f.contiguous().view(
-            nb_samples, nb_channels, self.n_fft // 2 + 1, -1, 2
-        )
-        return stft_f
-
-
-class Spectrogram(nn.Module):
-    def __init__(
-        self,
-        power=1,
-        mono=True
-    ):
-        super(Spectrogram, self).__init__()
-        self.power = power
-        self.mono = mono
-
-    def forward(self, stft_f):
-        """
-        Input: complex STFT
-            (nb_samples, nb_bins, nb_frames, 2)
-        Output: Power/Mag Spectrogram
-            (nb_frames, nb_samples, nb_channels, nb_bins)
-        """
-        stft_f = stft_f.transpose(2, 3)
-        # take the magnitude
-        stft_f = stft_f.pow(2).sum(-1).pow(self.power / 2.0)
-
-        # downmix in the mag domain
-        if self.mono:
-            stft_f = torch.mean(stft_f, 1, keepdim=True)
-
-        # permute output for LSTM convenience
-        return stft_f.permute(2, 0, 1, 3)
-
-
 class OpenUnmix(nn.Module):
     def __init__(
         self,
@@ -125,7 +44,7 @@ class OpenUnmix(nn.Module):
         #    self.transform = NoOp()
         #else:
         #    self.transform = nn.Sequential(self.stft, self.spec)
-        
+
         self.fc1 = Linear(
             self.nb_bins*nb_channels, hidden_size,
             bias=False
@@ -191,6 +110,7 @@ class OpenUnmix(nn.Module):
         # check for waveform or spectrogram
         # transform to spectrogram if (nb_samples, nb_channels, nb_timesteps)
         # and reduce feature dimensions, therefore we reshape
+        #x = self.transform(x)
         #x = self.transform(x)
         x = x.permute(3, 0, 1, 2)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape

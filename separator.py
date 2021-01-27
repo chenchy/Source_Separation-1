@@ -11,8 +11,10 @@ import museval
 from utils.general_utils import get_statistics, bandwidth_to_max_bin, EarlyStopping, AverageMeter
 from utils.augmentation import _augment_freq_masking
 import tqdm
+import sys
+import time
 
-#os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 class Separator(object):
 
@@ -44,21 +46,22 @@ class Separator(object):
         
         # preprocessing
         mix_audio, tar_audio = batch
-
-        if self.hparams.dataset_name == 'slakh':
-            mix_audio = mix_audio.permute(1, 0, 2).float()
-            tar_audio = tar_audio.permute(1, 0, 2).float()
+        mix_audio, tar_audio = mix_audio.float(), tar_audio.float()
+        if mix_audio.shape[1] != self.hparams.n_channels:
+            mix_audio = (mix_audio.sum(1) / mix_audio.shape[1]).unsqueeze(1)
+            tar_audio = (tar_audio.sum(1) / tar_audio.shape[1]).unsqueeze(1)
+        #if self.hparams.dataset_name == 'slakh':
+        #    mix_audio = mix_audio.permute(1, 0, 2)
+        #    tar_audio = tar_audio.permute(1, 0, 2)
 
         batch_size = mix_audio.shape[0]
-        if partition == 'va':
-            mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-            tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-            mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
-            tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
-        mix_stft = self.transform(mix_audio)
-        tar_stft = self.transform(tar_audio)
-        mix_mag = mix_stft.pow(2).sum(-1).pow(1 / 2.0)
-        tar_mag = tar_stft.pow(2).sum(-1).pow(1 / 2.0)
+        #if partition == 'va':
+        #    mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+        #    tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+        #    mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
+        #    tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
+        mix_stft, mix_mag = self.transform(mix_audio)
+        tar_stft, tar_stft = self.transform(tar_audio)
         # (batch, channel, n_features, n_frames)
         mix_mag_detach = mix_mag.detach().clone()
 
@@ -73,14 +76,20 @@ class Separator(object):
     def training_step(self):
         losses = AverageMeter()
         self.model.train()
-        pbar = tqdm.tqdm(self.train_set, disable=False)
-        for x, y, _ in pbar:
+        st = time.time()
+        #pbar = tqdm.tqdm(self.train_set, disable=False)
+        for i, (x, y, _) in enumerate(self.train_set):
             x, y = x.to(self.use_device), y.to(self.use_device)
             self.optimizer.zero_grad()
             loss = self.forward((x, y), 'tr')
             loss.backward()
             self.optimizer.step()
             losses.update(loss.item(), x.shape[1])
+
+            sys.stdout.write('\r')
+            sys.stdout.write('| Iter[%4d/%4d]\tLoss %4f\tTime %d'%(i+1, len(self.train_set), loss.item(), time.time() - st))
+            sys.stdout.flush()
+
         return losses.avg
 
 
@@ -102,44 +111,66 @@ class Separator(object):
         import numpy as np
 
         self.model.eval()
+        # preprocessing feature
+        audio_torch = mix_audio.float().to(self.use_device)
 
-        mix_audio = mix_audio.to(self.use_device)
-        mix_stft = self.transform(mix_audio)
-        mix_mag = mix_stft.pow(2).sum(-1).pow(1 / 2.0)
+        source_names = [self.hparams.target, 'accompaniment']
+        X_stft, X_mag = self.transform(audio_torch)
+        pre_mag = self.model(X_mag, X_mag.detach().clone()).cpu().detach().numpy()
+        # output is nb_samples, nb_channels, nb_bins, nb_frames
 
-        #pre_mag = self.model(mix_mag, mix_mag.detach().clone())
-        pre_mag_list = []
-        chunk_size = int(mix_mag.shape[-1] // 4) + 1
+        pre_mag = np.transpose(pre_mag, (3, 2, 1, 0))
 
-        for i in range(mix_mag.shape[-1] // chunk_size + 1):
-            inp = mix_mag[..., i * chunk_size : (i + 1) * chunk_size]
-            pre_mag_list.append(self.model(inp, inp.detach()))
-        pre_mag = torch.cat(pre_mag_list, -1)
+        X_stft = X_stft.detach().cpu().numpy()
+        X_stft = X_stft[..., 0] + X_stft[..., 1]*1j
+        X_stft = X_stft[0].transpose(2, 1, 0)
+        pre_mag = np.concatenate((pre_mag, np.abs(X_stft)[..., None] - pre_mag), axis=-1)
+        # frames, bins, channels, sources
+        pre_stft = pre_mag * np.exp(1j*np.angle(X_stft[..., None]))
 
-        pre_mag = pre_mag.squeeze().permute(2, 1, 0).detach().cpu().numpy()
-
-        mix_stft = mix_stft.squeeze().detach().cpu().numpy()
-        mix_stft = mix_stft[..., 0] + mix_stft[..., 1]*1j
-        pre_residual = mix_mag.squeeze().permute(2, 1, 0).detach().cpu().numpy() - pre_mag
-        pre_stft = np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1) * np.exp(1j*np.angle(np.transpose(mix_stft, (2, 1, 0))[..., None]))
-        #pre_stft = norbert.wiener(np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1), 
-        #                          mix_stft.T.astype(np.complex128), 1, use_softmask=False)
-        print(pre_stft.shape)
-        estimates = {}
-        names = ['vocals', 'accompaniment']
-        for i, name in enumerate(names):
-
-            t, pre_audio = scipy.signal.istft(
-                pre_stft[...,i].T / (self.hparams.n_fft / 2),
+        audio_estimates = []
+        for j, name in enumerate(source_names):
+            _, audio_hat = scipy.signal.istft(
+                pre_stft[..., j].T / (self.hparams.n_fft / 2),
                 44100,
                 nperseg=self.hparams.n_fft,
                 noverlap=self.hparams.n_fft - self.hparams.hop_length,
                 boundary=True
             )
-            estimates[name] = pre_audio.T
+            audio_estimates.append(audio_hat.T)
 
+
+        # gather reference tracks
         track = self.loaders['test'].mus.tracks[track_id]
-        scores = museval.eval_mus_track(track, estimates)
+        ref_tar = track.targets[self.hparams.target].audio
+        ref_res = track.audio - track.targets[self.hparams.target].audio
+        if ref_tar.shape[1] != self.hparams.n_channels:
+            ref_tar = (ref_tar.sum(1) / ref_tar.shape[1])[..., None]
+            ref_res = (ref_res.sum(1) / ref_res.shape[1])[..., None]
+        audio_reference = [ref_tar, ref_res]
+        #scores = museval.eval_mus_track(track, audio_estimates)
+
+        SDR, ISR, SIR, SAR = museval.evaluate(
+            audio_reference,
+            audio_estimates,
+            win=int(1.0*44100),
+            hop=int(1.0*44100),
+            mode='v4'
+        )
+        scores = museval.aggregate.TrackStore(win=1.0, hop=1.0, track_name=track.name)
+        for i, target in enumerate(source_names):
+            values = {
+                "SDR": SDR[i].tolist(),
+                "SIR": SIR[i].tolist(),
+                "ISR": ISR[i].tolist(),
+                "SAR": SAR[i].tolist()
+            }
+
+            scores.add_target(
+                target_name=target,
+                values=values
+            )
+        
         print(scores)
         return scores
 
@@ -169,7 +200,7 @@ class Separator(object):
 
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path, default_params):
-        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+        checkpoint = torch.load(checkpoint_path) #, map_location=lambda storage, loc: storage)
         import yaml
         from argparse import Namespace
         default_params = yaml.safe_load(open(default_params))
@@ -177,8 +208,11 @@ class Separator(object):
         inp_harams.use_norm = False
 
         separator = cls(inp_harams)
-        pretrained_dict = checkpoint
-        separator.model.load_state_dict(pretrained_dict)
+
+        model_dict = separator.model.state_dict()
+        pretrained_dict = {k: v for k, v in checkpoint.items() if k in model_dict}
+        model_dict.update(pretrained_dict) 
+        separator.model.load_state_dict(model_dict)
 
         separator.transform.center = True
 

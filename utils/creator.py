@@ -57,9 +57,9 @@ def dataset_creator(hparams, partition):
             [globals()[aug] for aug in aug_list]
         )
 
-    if hparams.dataset_name == 'musdb':
+    if hparams.dataset_name == 'musdb' or partition == 'valid':
         dataset_kwargs = {
-            'root': hparams.data_path,
+            'root': '../data/MUSDB18-HQ/', #hparams.data_path,
             'is_wav': True,
             'subsets': 'train' if partition!='test' else 'test',
             'target': hparams.target,

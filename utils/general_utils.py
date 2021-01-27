@@ -150,6 +150,6 @@ def save_checkpoint(state, is_best, path, target):
 
 def target_to_midi_number(target):
     if target == 'bass':
-        numbers = np.arange(33, 40)
+        numbers = np.arange(32, 39)
 
     return numbers

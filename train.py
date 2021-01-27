@@ -19,15 +19,17 @@ def main(hparams, yaml_hparam):
     valid_losses = []
     best_epoch = 0
 
-    ckpt_path = os.path.join('logger', hparams.model_name+'_'+hparams.dataset_name)
+    ckpt_path = os.path.join('logger', hparams.model_name+'_'+hparams.dataset_name+'')
     if not os.path.exists(ckpt_path):
         os.makedirs(ckpt_path)
-
 
     with open(os.path.join(ckpt_path, hparams.target+'.yaml'), 'w') as file:
         documents = yaml.dump(yaml_hparam, file)
 
     separator = Separator(hparams)
+    if hparams.load_pretrain:
+        checkpoint = torch.load(os.path.join(hparams.load_pretrain, hparams.target+'.pth')) 
+        separator.model.load_state_dict(checkpoint)
     for epoch in t:
         t.set_description("Training Epoch")
         train_loss = separator.training_step()
@@ -56,8 +58,6 @@ def main(hparams, yaml_hparam):
             path=ckpt_path,
             target=hparams.target
         )
-
-        
 
         if stop:
             print("Apply Early Stopping")

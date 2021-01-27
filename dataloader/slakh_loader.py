@@ -6,7 +6,6 @@ import pypianoroll
 from utils.general_utils import target_to_midi_number
 import os
 import warnings
-import fluidsynth
 import numpy as np
 import soundfile as sf
 
@@ -37,9 +36,9 @@ class SlakhDataset(torch.utils.data.Dataset):
         self.tempo = tempo
         self.sr = sr
         if self.split == 'train':
-            self.file_list = np.load('valid_bass.npy')[50:]
+            self.file_list = np.load('valid_bass.npy')[49:]
         else:
-            self.file_list = np.load('valid_bass.npy')[:50]
+            self.file_list = np.load('valid_bass.npy')[:49]
 
     def __getitem__(self, index):
 
@@ -78,55 +77,50 @@ class SlakhDataset(torch.utils.data.Dataset):
             target_data = target_data.trim(int(chunk_start), int(chunk_start) + resolution)
             target_data = pypianoroll.to_pretty_midi(target_data)
 
+            if len(midi_data.instruments) == 0 or all(len(i.notes) == 0 for i in midi_data.instruments):
+                index = index - 1 if index > 0 else index + 1
+                return self.__getitem__(index)
+
             # sythesized
             sf2_name = random.choice(self.sf2_list)
-            audio_mix = midi_data.fluidsynth(self.sr, self.sf2_dir + sf2_name)
-            audio_tar = target_data.fluidsynth(self.sr, self.sf2_dir + sf2_name)
+            audio_mix, norm_max = self.fluidsynth(midi_data, self.sr, self.sf2_dir + sf2_name)
+            audio_tar, _ = self.fluidsynth(target_data, self.sr, self.sf2_dir + sf2_name, norm_max)
             if len(audio_tar) < self.sr * self.samples_per_track * self.seq_duration or len(audio_mix) < self.sr * self.samples_per_track * self.seq_duration:
                 index = index - 1 if index > 0 else index + 1
                 return self.__getitem__(index)
-            
+
             audio_mix_list, audio_tar_list = [], []
             chunk = self.seq_duration * self.sr
             for i in range(self.samples_per_track):
                 audio_mix_list.append(audio_mix[chunk * i : chunk * (i+1)])
                 audio_tar_list.append(audio_tar[chunk * i : chunk * (i+1)])
-                #chunk_start = int(random.uniform(0, length - self.seq_duration * self.sr))
-                #audio_mix_list.append(audio_mix[chunk_start : chunk_start + self.seq_duration * self.sr])
-                #audio_tar_list.append(audio_tar[chunk_start : chunk_start + self.seq_duration * self.sr])
             audio_mix = np.array(audio_mix_list)
             audio_tar = np.array(audio_tar_list)
             
         if self.split == 'valid':
-            #length = min(audio_mix.shape[-1], audio_tar.shape[-1])
-            #audio_tar = audio_tar[None, :length]
-            #audio_mix = audio_mix[None, :length]
             audio_tar = sf.read('../data/slakh/val_audio/tar/'+file_name.replace('mid', 'wav'), stop=180*44100)[0][None, :] #, audio_tar.T, 44100)
             audio_mix = sf.read('../data/slakh/val_audio/mix/'+file_name.replace('mid', 'wav'), stop=180*44100)[0][None, :] #, audio_mix.T, 44100)
-
-        '''
-        # chunk data
         
-        if self.split == 'train':
-            length = target_data.get_length()
-            
-            chunk_start = random.uniform(0, length - self.seq_duration * 40)
-            midi_data = midi_data.trim(0, int(chunk_start) + self.seq_duration * 40)
-            midi_data = midi_data.trim(int(chunk_start), int(chunk_start) + self.seq_duration * 40)
-            midi_data = pypianoroll.to_pretty_midi(midi_data)
-            #print(target_data.get_length(), chunk_start)
-            target_data = target_data.trim(0, int(chunk_start) + self.seq_duration * 40)
-            target_data = target_data.trim(int(chunk_start), int(chunk_start) + self.seq_duration * 40)
-            target_data = pypianoroll.to_pretty_midi(target_data)
-        
-        sf2_name = random.choice(self.sf2_list)
-        audio_mix = midi_data.fluidsynth(self.sr, self.sf2_dir + sf2_name)
-        audio_tar = target_data.fluidsynth(self.sr, self.sf2_dir + sf2_name)
-        if len(audio_tar) == 0:
-            index = index - 1 if index > 0 else index + 1
-            return self.__getitem__(index)
-        '''
         return audio_mix, audio_tar, file_name
 
+    def fluidsynth(self, pretty_midi_obj, fs, sf2_path, norm_max=None):
+        #if len(pretty_midi_obj.instruments) == 0 or all(len(i.notes) == 0 for i in pretty_midi_obj.instruments):
+        #    print('yes!')
+        # Get synthesized waveform for each instrument
+        waveforms = [i.fluidsynth(fs=fs, sf2_path=sf2_path) for i in pretty_midi_obj.instruments]
+        # Allocate output waveform, with #sample = max length of all waveforms
+        synthesized = np.zeros(np.max([w.shape[0] for w in waveforms]))
+        # Sum all waveforms in
+        for waveform in waveforms:
+            synthesized[:waveform.shape[0]] += waveform
+        # Normalize
+        if not norm_max:    
+            norm_max = np.abs(synthesized).max()
+        #synthesized = float(synthesized)
+        synthesized /= norm_max
+
+        #print(synthesized.max(), synthesized.min())
+        return synthesized, norm_max
+
     def __len__(self):
-        return len(self.file_list) #* self.samples_per_track
+        return len(self.file_list) #// 2 #* self.samples_per_track

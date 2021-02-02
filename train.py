@@ -19,7 +19,7 @@ def main(hparams, yaml_hparam):
     valid_losses = []
     best_epoch = 0
 
-    ckpt_path = os.path.join('logger', hparams.model_name+'_'+hparams.dataset_name+'')
+    ckpt_path = os.path.join('logger', hparams.model_name+'_'+hparams.dataset_name+'_4')
     if not os.path.exists(ckpt_path):
         os.makedirs(ckpt_path)
 

@@ -119,8 +119,8 @@ def get_statistics(args, dataset, preprocessor):
     for ind in pbar:
         x, y, _ = dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
-        X = preprocessor((x.sum(0)/2)[None, None, ...])
-        X = X.pow(2).sum(-1).pow(1 / 2.0).permute(3, 0, 1, 2).detach().cpu().numpy()
+        _, X = preprocessor((x.sum(0)/2)[None, None, ...])
+        X = X.permute(3, 0, 1, 2).detach().cpu().numpy()
         scaler.partial_fit(np.squeeze(X))
 
     # set inital input scaler values
@@ -151,5 +151,7 @@ def save_checkpoint(state, is_best, path, target):
 def target_to_midi_number(target):
     if target == 'bass':
         numbers = np.arange(32, 39)
+    elif target == 'drums':
+        numbers = [0]
 
     return numbers

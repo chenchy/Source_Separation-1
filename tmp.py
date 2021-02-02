@@ -19,7 +19,10 @@ def select_inst(inst_name):
             target_tracks = []
             max_length = 0
             for inst in midi_data.tracks:
-                if inst.program in target_to_midi_number(inst_name):
+                if inst_name == 'drums' and inst.is_drum:
+                    max_length = max(max_length, inst.get_length())
+                    target_tracks.append(inst.copy().standardize())
+                elif inst_name != 'drums' and inst.program in target_to_midi_number(inst_name):
                     max_length = max(max_length, inst.get_length())
                     target_tracks.append(inst.copy().standardize())
             if len(target_tracks) != 0 and max_length > 40 * 96:
@@ -28,9 +31,9 @@ def select_inst(inst_name):
         except Exception as e: 
             pass
     print(len(valid_midi), len(os.listdir('../data/slakh/midi/')))
-    np.save('valid_bass.npy', np.array(valid_midi))
+    np.save('valid_drums.npy', np.array(valid_midi))
 
-select_inst('bass')
+select_inst('drums')
 
 def valid_synth(file_path):
     for file in tqdm.tqdm(np.load(file_path)[:1]):

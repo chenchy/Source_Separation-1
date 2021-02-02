@@ -36,9 +36,9 @@ class SlakhDataset(torch.utils.data.Dataset):
         self.tempo = tempo
         self.sr = sr
         if self.split == 'train':
-            self.file_list = np.load('valid_bass.npy')[49:]
+            self.file_list = np.load('valid_'+self.target+'.npy')[50:]
         else:
-            self.file_list = np.load('valid_bass.npy')[:49]
+            self.file_list = np.load('valid_'+self.target+'.npy')[:50]
 
     def __getitem__(self, index):
 
@@ -57,7 +57,9 @@ class SlakhDataset(torch.utils.data.Dataset):
             # test target inside
             target_tracks = []
             for inst in midi_data.tracks:
-                if inst.program in target_to_midi_number(self.target):
+                if self.target == 'drums' and inst.is_drum:
+                    target_tracks.append(inst.copy().standardize())
+                elif self.target != 'drums' and inst.program in target_to_midi_number(self.target):
                     target_tracks.append(inst.copy().standardize())
             if len(target_tracks) == 0:
                 index = index - 1 if index > 0 else index + 1
@@ -82,7 +84,7 @@ class SlakhDataset(torch.utils.data.Dataset):
                 return self.__getitem__(index)
 
             # sythesized
-            sf2_name = random.choice(self.sf2_list)
+            sf2_name = 'MuseScore_General.sf2' #random.choice(self.sf2_list)
             audio_mix, norm_max = self.fluidsynth(midi_data, self.sr, self.sf2_dir + sf2_name)
             audio_tar, _ = self.fluidsynth(target_data, self.sr, self.sf2_dir + sf2_name, norm_max)
             if len(audio_tar) < self.sr * self.samples_per_track * self.seq_duration or len(audio_mix) < self.sr * self.samples_per_track * self.seq_duration:
@@ -100,7 +102,7 @@ class SlakhDataset(torch.utils.data.Dataset):
         if self.split == 'valid':
             audio_tar = sf.read('../data/slakh/val_audio/tar/'+file_name.replace('mid', 'wav'), stop=180*44100)[0][None, :] #, audio_tar.T, 44100)
             audio_mix = sf.read('../data/slakh/val_audio/mix/'+file_name.replace('mid', 'wav'), stop=180*44100)[0][None, :] #, audio_mix.T, 44100)
-        
+
         return audio_mix, audio_tar, file_name
 
     def fluidsynth(self, pretty_midi_obj, fs, sf2_path, norm_max=None):

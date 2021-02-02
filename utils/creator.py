@@ -57,7 +57,7 @@ def dataset_creator(hparams, partition):
             [globals()[aug] for aug in aug_list]
         )
 
-    if hparams.dataset_name == 'musdb' or partition == 'valid':
+    if hparams.dataset_name == 'musdb' or partition == 'test':
         dataset_kwargs = {
             'root': '../data/MUSDB18-HQ/', #hparams.data_path,
             'is_wav': True,

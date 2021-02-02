@@ -61,7 +61,7 @@ class Separator(object):
         #    mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
         #    tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
         mix_stft, mix_mag = self.transform(mix_audio)
-        tar_stft, tar_stft = self.transform(tar_audio)
+        tar_stft, tar_mag = self.transform(tar_audio)
         # (batch, channel, n_features, n_frames)
         mix_mag_detach = mix_mag.detach().clone()
 

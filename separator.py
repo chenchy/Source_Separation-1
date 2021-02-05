@@ -55,11 +55,11 @@ class Separator(object):
         #    tar_audio = tar_audio.permute(1, 0, 2)
 
         batch_size = mix_audio.shape[0]
-        #if partition == 'va':
-        #    mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-        #    tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-        #    mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
-        #    tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
+        if partition == 'va':
+            mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+            tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+            mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
+            tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
         mix_stft, mix_mag = self.transform(mix_audio)
         tar_stft, tar_mag = self.transform(tar_audio)
         # (batch, channel, n_features, n_frames)
@@ -115,8 +115,14 @@ class Separator(object):
         audio_torch = mix_audio.float().to(self.use_device)
 
         source_names = [self.hparams.target, 'accompaniment']
+        oup_list = []        
         X_stft, X_mag = self.transform(audio_torch)
-        pre_mag = self.model(X_mag, X_mag.detach().clone()).cpu().detach().numpy()
+        chunk_size = X_mag.shape[-1]//3
+        for i in range(3):
+            pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()).cpu().detach().numpy()
+            oup_list.append(pre_mag)
+        pre_mag = np.concatenate(oup_list, -1)
+        X_stft = X_stft[:, :, :, :pre_mag.shape[-1]]
         # output is nb_samples, nb_channels, nb_bins, nb_frames
 
         pre_mag = np.transpose(pre_mag, (3, 2, 1, 0))

@@ -1,6 +1,6 @@
 # optimizer
 learning_rate: 0.001
-patience: 2 #80 # wait how many epochs without updating will adjust the learning rate
+patience: 80 #80 # wait how many epochs without updating will adjust the learning rate
 decay_factor: 0.3 # how many percent decrease for the learning rate each time
 weight_decay: 0.00001
 
@@ -8,7 +8,7 @@ weight_decay: 0.00001
 gradient_clip_val: 100 # maximum gradient value
 seed: 42 # random seed
 gpus: 1 # how many paralleled gpu for training
-early_stopping_patience: 10 #140 # wait for how many epochs not updating before applying early stopping
+early_stopping_patience: 140 #140 # wait for how many epochs not updating before applying early stopping
 batch_size: 16 #16 # numbers of batch
 num_workers: 4 # numbers of workers for paralleled dataloader
 epochs: 1000 # maximum epochs
@@ -30,7 +30,7 @@ sf2_dir: '../data/sf2/'
 target: 'bass' # which target source to train
 seq_dur: 6 # duration of each chunk
 samples_per_track: 64 #64 # how many sample per song
-use_norm: True
+use_norm: False
 n_channels: 2
 
 # preprocess
@@ -41,7 +41,7 @@ sample_rate: 44100
 band_width: 16000
 
 # model_name
-model_name: 'unet' # tcn / unet / open-unmix / spleeter
+model_name: 'tcn' # tcn / unet / open-unmix / spleeter
 kernal_size: 3 # numbers of kernal, only useful when model_name equals tcn
 n_blocks: 8 # numbers of dilated blocks, only useful when model_name equals tcn
 n_stacks: 4 # numbers of repeated blocks, only useful when model_name equals tcn

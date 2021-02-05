@@ -4,6 +4,7 @@ import glob
 import os
 import tqdm
 import yaml 
+import subprocess as sp
 
 import numpy as np
 import torch
@@ -19,7 +20,7 @@ def main(hparams, yaml_hparam):
     valid_losses = []
     best_epoch = 0
 
-    ckpt_path = os.path.join('logger', hparams.model_name+'_'+hparams.dataset_name+'_4')
+    ckpt_path = os.path.join('logger', hparams.model_name+'_'+hparams.dataset_name+'')
     if not os.path.exists(ckpt_path):
         os.makedirs(ckpt_path)
 
@@ -62,6 +63,9 @@ def main(hparams, yaml_hparam):
         if stop:
             print("Apply Early Stopping")
             break
+
+    ffmpeg_command = f'python test.py --ckpt_path {ckpt_path} --target {hparams.target}'
+    sp.call(ffmpeg_command, shell=True)
 
 
 if __name__ == '__main__':

@@ -86,7 +86,7 @@ class Decode(nn.Module):
         return pred
 
 class Unet(nn.Module):
-    def __init__(self, n_fft=4096, max_bin=None):
+    def __init__(self, n_fft=4096, max_bin=None, input_mean=None, input_scale=None,):
         super(Unet, self).__init__()
 
         self.nb_output_bins = n_fft // 2 + 1
@@ -101,13 +101,39 @@ class Unet(nn.Module):
         self.decode = Decode(nb_channels)
         self.last = nn.Linear(self.nb_bins, self.nb_output_bins)
 
+        if input_mean is not None:
+            input_mean = torch.from_numpy(
+                input_mean[:self.nb_bins]
+            ).float()
+        else:
+            input_mean = torch.zeros(self.nb_bins)
+
+        if input_scale is not None:
+            input_scale = torch.from_numpy(
+                1.0*input_scale[:self.nb_bins]
+            ).float()
+        else:
+            input_scale = torch.ones(self.nb_bins)
+
+        self.input_mean = nn.Parameter(input_mean)
+        self.input_scale = nn.Parameter(input_scale)
+
+        self.output_scale = nn.Parameter(
+            torch.ones(self.nb_output_bins).float()
+        )
+        self.output_mean = nn.Parameter(
+            torch.ones(self.nb_output_bins).float()
+        )
+
     def forward(self, x, mix):
         x = x.permute(3, 0, 1, 2)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
-        mix = x.detach().clone()
 
         # crop
         x = x[..., :self.nb_bins].contiguous()
+
+        x += self.input_mean
+        x *= self.input_scale
        
         # to (nb_frames*nb_samples, nb_channels*nb_bins)
         # and encode to (nb_frames*nb_samples, hidden_size)
@@ -115,7 +141,11 @@ class Unet(nn.Module):
 
         x = self.decode(x, idx, s, c)
         x = self.last(x.permute(0,1,3,2)).permute(2, 0, 1, 3).contiguous()
+
+        x *= self.output_scale
+        x += self.output_mean
+
         # since our output is non-negative, we can apply RELU
-        x = F.sigmoid(x) * mix
+        x = F.relu(x).permute(1, 2, 3, 0) * mix
      
-        return x.permute(1, 2, 3, 0)
+        return x

@@ -27,10 +27,10 @@ save_path: 'logger/' # path to store the output model
 dataset_name: 'musdb' # which dataset to use: [musdb]
 data_path: '../data/MUSDB18-HQ/' #'../data/slakh/midi/' # path of the dataset:
 sf2_dir: '../data/sf2/'
-target: 'bass' # which target source to train
+target: 'vocals' # which target source to train
 seq_dur: 6 # duration of each chunk
 samples_per_track: 64 #64 # how many sample per song
-use_norm: False
+use_norm: True
 n_channels: 2
 
 # preprocess
@@ -41,7 +41,7 @@ sample_rate: 44100
 band_width: 16000
 
 # model_name
-model_name: 'tcn' # tcn / unet / open-unmix / spleeter
+model_name: 'unet' # tcn / unet / open-unmix / spleeter
 kernal_size: 3 # numbers of kernal, only useful when model_name equals tcn
 n_blocks: 8 # numbers of dilated blocks, only useful when model_name equals tcn
 n_stacks: 4 # numbers of repeated blocks, only useful when model_name equals tcn

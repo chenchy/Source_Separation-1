@@ -20,7 +20,7 @@ def model_creator(hparams):
                     hparams.kernal_size, hparams.n_stacks, hparams.n_blocks, hparams.max_bin)
 
     if hparams.model_name == 'unet':
-        model = Unet.Unet(hparams.n_fft)
+        model = Unet.Unet(hparams.n_fft, hparams.max_bin, hparams.mean, hparams.std)
 
     if hparams.model_name == 'spleeter':
         model = spleeter.Spleeter()

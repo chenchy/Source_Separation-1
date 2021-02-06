@@ -55,19 +55,26 @@ class Separator(object):
         #    tar_audio = tar_audio.permute(1, 0, 2)
 
         batch_size = mix_audio.shape[0]
-        if partition == 'va':
-            mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-            tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-            mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
-            tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, self.hparams.n_channels).permute(0, 2, 1)
         mix_stft, mix_mag = self.transform(mix_audio)
         tar_stft, tar_mag = self.transform(tar_audio)
-        # (batch, channel, n_features, n_frames)
-        mix_mag_detach = mix_mag.detach().clone()
+        
+        if partition == 'va':
+            chunk_size = mix_mag.shape[-1]//2
+            oup_list = []
+            for i in range(2):
+                # (batch, channel, n_features, n_frames)
+                mix_mag_detach = mix_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()
+                pre_mag = self.model(mix_mag[..., i*chunk_size:(i+1)*chunk_size], mix_mag_detach)
+                oup_list.append(pre_mag)
+            pre_mag = torch.cat(oup_list, -1)
+            tar_mag = tar_mag[..., :pre_mag.shape[-1]]
+        else:
+            # (batch, channel, n_features, n_frames)
+            mix_mag_detach = mix_mag.detach().clone()
 
-        if self.hparams.aug_freqmask:
-            mix_mag = _augment_freq_masking(mix_mag)
-        pre_mag = self.model(mix_mag, mix_mag_detach)
+            if self.hparams.aug_freqmask:
+                mix_mag = _augment_freq_masking(mix_mag)
+            pre_mag = self.model(mix_mag, mix_mag_detach)
 
         loss = self.loss_func(pre_mag, tar_mag)
 

@@ -12,14 +12,19 @@ def main(args):
     results = museval.EvalStore()
 
     test_set = model._get_data_loader('test')
-    for mix_audio, tar_audio, track_id in tqdm.tqdm(test_set):
+    for data in tqdm.tqdm(test_set):
+        mix_audio, tar_audio, track_id = data[0], data[1], data[2]
+        if model.hparams.add_emb:
+            emb = data[3]
+        else:
+            emb = None
         if mix_audio.shape[1] != model.hparams.n_channels:
             mix_audio = (mix_audio.sum(1) / mix_audio.shape[1]).unsqueeze(1)
             tar_audio = (tar_audio.sum(1) / tar_audio.shape[1]).unsqueeze(1)
         
-        score = model.test_step(mix_audio, tar_audio, track_id)
+        score = model.test_step(mix_audio, tar_audio, track_id, emb)
         results.add_track(score)
-    
+
     print(results)
     method = museval.MethodStore()
     method.add_evalstore(results, model.hparams.model_name)

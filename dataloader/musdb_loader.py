@@ -1,6 +1,8 @@
 import torch
 import musdb
 import random
+import os
+import numpy as np
 
 class MUSDBDataset(torch.utils.data.Dataset):
     def __init__(
@@ -17,6 +19,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         random_track_mix=False,
         dtype=torch.float32,
         seed=42,
+        add_emb=None,
         *args, **kwargs
     ):
 
@@ -29,6 +32,8 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.samples_per_track = samples_per_track
         self.source_augmentations = source_augmentations
         self.random_track_mix = random_track_mix
+        self.root = root
+        self.add_emb = add_emb
         self.mus = musdb.DB(
             root=root,
             is_wav=is_wav,
@@ -55,14 +60,14 @@ class MUSDBDataset(torch.utils.data.Dataset):
                     target_ind = k
 
                 # select a random track
-                if self.random_track_mix:
-                    track = random.choice(self.mus.tracks)
+                #if self.random_track_mix:
+                #    track = random.choice(self.mus.tracks)
 
                 # set the excerpt duration
                 track.chunk_duration = self.seq_duration
                 # set random start position
                 track.chunk_start = random.uniform(
-                    0, track.duration - self.seq_duration
+                    0, track.duration - self.seq_duration - 1
                 )
                 # load source audio and apply time domain source_augmentations
                 audio = torch.tensor(
@@ -98,7 +103,17 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 dtype=self.dtype
             )
 
-        return x, y, index // self.samples_per_track
+        if self.add_emb:
+            vgg_time = (int(np.round(track.chunk_start/0.96)))
+            if self.split == 'train':
+                vgg = np.load(os.path.join(self.root, 'vggish', track.name+'.npy'))[vgg_time: vgg_time+6]
+            else:
+                vgg = np.load(os.path.join(self.root, 'vggish', track.name+'.npy'))
+
+            return x, y, index // self.samples_per_track, vgg
+        else:
+            return x, y, index // self.samples_per_track
+        
 
     def __len__(self):
 

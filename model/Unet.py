@@ -125,7 +125,7 @@ class Unet(nn.Module):
             torch.ones(self.nb_output_bins).float()
         )
 
-    def forward(self, x, mix):
+    def forward(self, x, mix, emb=None):
         x = x.permute(3, 0, 1, 2)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
@@ -138,6 +138,8 @@ class Unet(nn.Module):
         # to (nb_frames*nb_samples, nb_channels*nb_bins)
         # and encode to (nb_frames*nb_samples, hidden_size)
         x, idx, s, c = self.encode(x.permute(1,2,3,0).contiguous())
+        if emb:
+            print(x.shape, emb.shape)
 
         x = self.decode(x, idx, s, c)
         x = self.last(x.permute(0,1,3,2)).permute(2, 0, 1, 3).contiguous()

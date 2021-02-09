@@ -16,8 +16,9 @@ class OpenUnmix(nn.Module):
         input_mean=None,
         input_scale=None,
         max_bin=None,
-        unidirectional=False,
+        unidirectional=True,
         power=1,
+        add_emb=False
     ):
         """
         Input: (nb_samples, nb_channels, nb_timesteps)
@@ -27,6 +28,8 @@ class OpenUnmix(nn.Module):
         """
 
         super(OpenUnmix, self).__init__()
+
+        self.add_emb = add_emb
 
         self.nb_output_bins = n_fft // 2 + 1
         if max_bin:
@@ -45,8 +48,12 @@ class OpenUnmix(nn.Module):
         #else:
         #    self.transform = nn.Sequential(self.stft, self.spec)
 
+        if add_emb:
+            inp_feature = self.nb_bins*nb_channels + 128
+        else:
+            inp_feature = self.nb_bins*nb_channels
         self.fc1 = Linear(
-            self.nb_bins*nb_channels, hidden_size,
+            inp_feature, hidden_size,
             bias=False
         )
 
@@ -58,7 +65,7 @@ class OpenUnmix(nn.Module):
             lstm_hidden_size = hidden_size // 2
 
         self.lstm = LSTM(
-            input_size=hidden_size,
+            input_size=lstm_hidden_size,
             hidden_size=lstm_hidden_size,
             num_layers=nb_layers,
             bidirectional=not unidirectional,
@@ -67,7 +74,7 @@ class OpenUnmix(nn.Module):
         )
 
         self.fc2 = Linear(
-            in_features=hidden_size*2,
+            in_features=lstm_hidden_size*2,
             out_features=hidden_size,
             bias=False
         )
@@ -106,12 +113,11 @@ class OpenUnmix(nn.Module):
             torch.ones(self.nb_output_bins).float()
         )
 
-    def forward(self, x, mix):
+    def forward(self, x, mix, emb=None):
         # check for waveform or spectrogram
         # transform to spectrogram if (nb_samples, nb_channels, nb_timesteps)
         # and reduce feature dimensions, therefore we reshape
-        #x = self.transform(x)
-        #x = self.transform(x)
+        # emb (batch frames 128)
         x = x.permute(3, 0, 1, 2)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
@@ -124,7 +130,12 @@ class OpenUnmix(nn.Module):
 
         # to (nb_frames*nb_samples, nb_channels*nb_bins)
         # and encode to (nb_frames*nb_samples, hidden_size)
-        x = self.fc1(x.reshape(-1, nb_channels*self.nb_bins))
+
+        x = x.reshape(-1, nb_channels*self.nb_bins)
+        if self.add_emb:
+            x = torch.cat((emb.reshape(-1, emb.shape[-1]), x), -1)
+
+        x = self.fc1(x)
         # normalize every instance in a batch
         x = self.bn1(x)
         x = x.reshape(nb_frames, nb_samples, self.hidden_size)

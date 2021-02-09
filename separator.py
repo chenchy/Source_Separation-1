@@ -45,7 +45,9 @@ class Separator(object):
         oup_dict = {}
         
         # preprocessing
-        mix_audio, tar_audio = batch
+        mix_audio, tar_audio = batch[0], batch[1]
+        
+        
         mix_audio, tar_audio = mix_audio.float(), tar_audio.float()
         if mix_audio.shape[1] != self.hparams.n_channels:
             mix_audio = (mix_audio.sum(1) / mix_audio.shape[1]).unsqueeze(1)
@@ -57,14 +59,25 @@ class Separator(object):
         batch_size = mix_audio.shape[0]
         mix_stft, mix_mag = self.transform(mix_audio)
         tar_stft, tar_mag = self.transform(tar_audio)
-        
+
+        if self.hparams.add_emb:
+            emb = batch[2]
+            mul = int(mix_mag.shape[-1]//emb.shape[1])
+            emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: mix_mag.shape[-1]]
+
+        else:
+            emb = None
+
         if partition == 'va':
             chunk_size = mix_mag.shape[-1]//2
             oup_list = []
             for i in range(2):
                 # (batch, channel, n_features, n_frames)
                 mix_mag_detach = mix_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()
-                pre_mag = self.model(mix_mag[..., i*chunk_size:(i+1)*chunk_size], mix_mag_detach)
+                if self.hparams.add_emb:
+                    pre_mag = self.model(mix_mag[..., i*chunk_size:(i+1)*chunk_size], mix_mag_detach, emb[i*chunk_size:(i+1)*chunk_size])
+                else:
+                    pre_mag = self.model(mix_mag[..., i*chunk_size:(i+1)*chunk_size], mix_mag_detach)
                 oup_list.append(pre_mag)
             pre_mag = torch.cat(oup_list, -1)
             tar_mag = tar_mag[..., :pre_mag.shape[-1]]
@@ -74,7 +87,7 @@ class Separator(object):
 
             if self.hparams.aug_freqmask:
                 mix_mag = _augment_freq_masking(mix_mag)
-            pre_mag = self.model(mix_mag, mix_mag_detach)
+            pre_mag = self.model(mix_mag, mix_mag_detach, emb)
 
         loss = self.loss_func(pre_mag, tar_mag)
 
@@ -85,10 +98,14 @@ class Separator(object):
         self.model.train()
         st = time.time()
         #pbar = tqdm.tqdm(self.train_set, disable=False)
-        for i, (x, y, _) in enumerate(self.train_set):
-            x, y = x.to(self.use_device), y.to(self.use_device)
+        for i, data in enumerate(self.train_set):
+            x, y = data[0].to(self.use_device), data[1].to(self.use_device)
+            if self.hparams.add_emb:
+                emb = data[3].to(self.use_device)
+            else:
+                emb = None
             self.optimizer.zero_grad()
-            loss = self.forward((x, y), 'tr')
+            loss = self.forward((x, y, emb), 'tr')
             loss.backward()
             self.optimizer.step()
             losses.update(loss.item(), x.shape[1])
@@ -105,13 +122,17 @@ class Separator(object):
         self.model.eval()
         pbar = tqdm.tqdm(self.val_set, disable=False)
         with torch.no_grad():
-            for x, y, _ in pbar:
-                x, y = x.to(self.use_device), y.to(self.use_device)
-                loss = self.forward((x, y), 'va')
+            for data in pbar:
+                x, y = data[0].to(self.use_device), data[1].to(self.use_device)
+                if self.hparams.add_emb:
+                    emb = data[3].to(self.use_device)
+                else:
+                    emb = None
+                loss = self.forward((x, y, emb), 'va')
                 losses.update(loss.item(), x.shape[1])
         return losses.avg
 
-    def test_step(self, mix_audio, tar_audio, track_id):
+    def test_step(self, mix_audio, tar_audio, track_id, emb=None):
         import norbert
         import scipy.signal
         import museval
@@ -124,9 +145,18 @@ class Separator(object):
         source_names = [self.hparams.target, 'accompaniment']
         oup_list = []        
         X_stft, X_mag = self.transform(audio_torch)
-        chunk_size = X_mag.shape[-1]//3
-        for i in range(3):
-            pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()).cpu().detach().numpy()
+        if self.hparams.add_emb:
+            emb = emb.to(self.use_device)
+            mul = X_mag.shape[-1]//emb.shape[1]
+            emb = torch.repeat_interleave(emb, (mul+1)*emb.shape[1], 1).permute(1, 0, 2)[: X_mag.shape[-1]]
+
+        chunk_size = X_mag.shape[-1]//5
+        for i in range(5):
+            if self.hparams.add_emb:
+                pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone(), emb[i*chunk_size:(i+1)*chunk_size:]).cpu().detach().numpy()
+            else:
+                pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()).cpu().detach().numpy()
+
             oup_list.append(pre_mag)
         pre_mag = np.concatenate(oup_list, -1)
         X_stft = X_stft[:, :, :, :pre_mag.shape[-1]]

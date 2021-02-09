@@ -33,7 +33,8 @@ def model_creator(hparams):
                                     input_mean=hparams.mean,
                                     input_scale=hparams.std,
                                     max_bin=hparams.max_bin,
-                                    sample_rate=hparams.sample_rate)
+                                    sample_rate=hparams.sample_rate,
+                                    add_emb=hparams.add_emb)
 
     return model
 
@@ -72,7 +73,7 @@ def dataset_creator(hparams, partition):
             samples_per_track=hparams.samples_per_track if partition=='train' else 1,
             seq_duration=hparams.seq_dur if partition=='train' else None,
             source_augmentations=source_augmentations if partition=='train' else None,
-            random_track_mix=True if partition=='train' else False,
+            random_track_mix=True if partition=='train' else False, add_emb = hparams.add_emb,
             **dataset_kwargs
         )
 

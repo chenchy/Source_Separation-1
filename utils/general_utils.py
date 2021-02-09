@@ -117,7 +117,7 @@ def get_statistics(args, dataset, preprocessor):
     dataset_scaler.seq_duration = None
     pbar = tqdm.tqdm(range(len(dataset_scaler)))
     for ind in pbar:
-        x, y, _ = dataset_scaler[ind]
+        x, y = dataset_scaler[ind][0], dataset_scaler[ind][1]
         pbar.set_description("Compute dataset statistics")
         _, X = preprocessor((x.sum(0)/2)[None, None, ...])
         X = X.permute(3, 0, 1, 2).detach().cpu().numpy()

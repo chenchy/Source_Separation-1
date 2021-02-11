@@ -61,7 +61,8 @@ class Separator(object):
         tar_stft, tar_mag = self.transform(tar_audio)
 
         if self.hparams.add_emb:
-            emb = batch[2]
+            emb = batch[2].permute(0, 3, 1, 2)
+            emb = emb.reshape(emb.shape[0], emb.shape[1], -1)
             mul = int(mix_mag.shape[-1]//emb.shape[1])
             emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: mix_mag.shape[-1]]
 
@@ -69,9 +70,9 @@ class Separator(object):
             emb = None
 
         if partition == 'va':
-            chunk_size = mix_mag.shape[-1]//2
+            chunk_size = mix_mag.shape[-1]//3
             oup_list = []
-            for i in range(2):
+            for i in range(3):
                 # (batch, channel, n_features, n_frames)
                 mix_mag_detach = mix_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()
                 if self.hparams.add_emb:
@@ -158,6 +159,7 @@ class Separator(object):
                 pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()).cpu().detach().numpy()
 
             oup_list.append(pre_mag)
+        #pre_mag = self.model(X_mag, X_mag.detach().clone())
         pre_mag = np.concatenate(oup_list, -1)
         X_stft = X_stft[:, :, :, :pre_mag.shape[-1]]
         # output is nb_samples, nb_channels, nb_bins, nb_frames

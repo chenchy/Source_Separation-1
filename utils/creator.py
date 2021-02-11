@@ -17,7 +17,7 @@ def preprocess_creator(hparams):
 def model_creator(hparams):
     if hparams.model_name == 'tcn':
         model = tcn.tcn(hparams.max_bin, hparams.n_features, hparams.n_fft//2+1,
-                    hparams.kernal_size, hparams.n_stacks, hparams.n_blocks, hparams.max_bin)
+                    hparams.kernal_size, hparams.n_stacks, hparams.n_blocks, hparams.max_bin, hparams.mean, hparams.std)
 
     if hparams.model_name == 'unet':
         model = Unet.Unet(hparams.n_fft, hparams.max_bin, hparams.mean, hparams.std)
@@ -26,15 +26,16 @@ def model_creator(hparams):
         model = spleeter.Spleeter()
 
     if hparams.model_name == 'open-unmix':
-        model = open_unmix.OpenUnmix(nb_channels=hparams.n_channels,
-                                    hidden_size=hparams.n_features, 
-                                    n_fft=hparams.n_fft, 
+        model = open_unmix.OpenUnmix(n_fft=hparams.n_fft, 
                                     n_hop=hparams.hop_length,
+                                    nb_channels=hparams.n_channels,
+                                    hidden_size=hparams.n_features, 
                                     input_mean=hparams.mean,
                                     input_scale=hparams.std,
                                     max_bin=hparams.max_bin,
                                     sample_rate=hparams.sample_rate,
-                                    add_emb=hparams.add_emb)
+                                    add_emb=hparams.add_emb,
+                                    )
 
     return model
 
@@ -73,7 +74,8 @@ def dataset_creator(hparams, partition):
             samples_per_track=hparams.samples_per_track if partition=='train' else 1,
             seq_duration=hparams.seq_dur if partition=='train' else None,
             source_augmentations=source_augmentations if partition=='train' else None,
-            random_track_mix=True if partition=='train' else False, add_emb = hparams.add_emb,
+            random_track_mix=True if partition=='train' else False, add_emb = hparams.add_emb, 
+            emb_feature=hparams.emb_feature,
             **dataset_kwargs
         )
 

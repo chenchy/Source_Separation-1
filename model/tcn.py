@@ -37,7 +37,7 @@ class tcn(nn.Module):
 
         self.n_features = inp_features #- 1
 
-        self.input_norm = nn.BatchNorm1d(self.n_features)
+        self.input_norm = nn.BatchNorm1d(n_hidden)
         self.conv_in = nn.Conv1d(self.n_features, n_hidden, 1)
 
         di_conv_layers = []
@@ -76,7 +76,7 @@ class tcn(nn.Module):
             torch.ones(output_features).float()
         )
 
-    def forward(self, inp, mix):
+    def forward(self, inp, mix, emb=None):
         '''
         Input: (nb_samples, nb_channels, nb_features, nb_timesteps)
         Output:(nb_samples, nb_channels, nb_features, nb_timesteps)
@@ -102,6 +102,6 @@ class tcn(nn.Module):
 
         output = output.reshape(nb_samples, nb_channels, -1, nb_timesteps)
 
-        oup = F.sigmoid(output) * mix
+        oup = F.relu(output) * mix
 
         return oup

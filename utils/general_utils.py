@@ -145,7 +145,8 @@ def save_checkpoint(state, is_best, path, target):
         # save just the weights
         torch.save(
             state['state_dict'],
-            os.path.join(path, target + '.pth')
+            os.path.join(path, target + '.pth'),
+            _use_new_zipfile_serialization=False
         )
 
 def target_to_midi_number(target):

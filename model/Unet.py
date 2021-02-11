@@ -43,7 +43,8 @@ class d_block(nn.Module):
 class Encode(nn.Module):
     def __init__(self, nb_channels):
         super(Encode, self).__init__()
-        f_size = 16
+
+        f_size = 16 
         k_size = (3,3)
         p_size = (1,1)
         ds_k = (3,1)

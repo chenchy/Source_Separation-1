@@ -39,7 +39,14 @@ class d_block(nn.Module):
 
 class Spleeter(nn.Module):
     def __init__(self):
-        super(Spleeter, self).__init__()
+        super(Spleeter, self, n_fft=4096, max_bin=None, input_mean=None, input_scale=None).__init__()
+
+        self.nb_output_bins = n_fft // 2 + 1
+
+        if max_bin:
+            self.nb_bins = max_bin
+        else:
+            self.nb_bins = self.nb_output_bins
 
         kernal = 16
 

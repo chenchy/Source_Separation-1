@@ -8,7 +8,6 @@ class OpenUnmix(nn.Module):
         self,
         n_fft=4096,
         n_hop=1024,
-        input_is_spectrogram=False,
         hidden_size=512,
         nb_channels=1,
         sample_rate=44100,
@@ -16,8 +15,7 @@ class OpenUnmix(nn.Module):
         input_mean=None,
         input_scale=None,
         max_bin=None,
-        unidirectional=True,
-        power=1,
+        unidirectional=False,
         add_emb=False
     ):
         """
@@ -49,11 +47,13 @@ class OpenUnmix(nn.Module):
         #    self.transform = nn.Sequential(self.stft, self.spec)
 
         if add_emb:
-            inp_feature = self.nb_bins*nb_channels + 128
+            inp_feature = hidden_size*2 + 128
+            self.emb_fc1 = Linear(128, 64, bias=False)
         else:
-            inp_feature = self.nb_bins*nb_channels
+            inp_feature = hidden_size*2
+
         self.fc1 = Linear(
-            inp_feature, hidden_size,
+            self.nb_bins*nb_channels, hidden_size,
             bias=False
         )
 
@@ -65,7 +65,7 @@ class OpenUnmix(nn.Module):
             lstm_hidden_size = hidden_size // 2
 
         self.lstm = LSTM(
-            input_size=lstm_hidden_size,
+            input_size=hidden_size,
             hidden_size=lstm_hidden_size,
             num_layers=nb_layers,
             bidirectional=not unidirectional,
@@ -74,7 +74,7 @@ class OpenUnmix(nn.Module):
         )
 
         self.fc2 = Linear(
-            in_features=lstm_hidden_size*2,
+            in_features=inp_feature,
             out_features=hidden_size,
             bias=False
         )
@@ -132,8 +132,6 @@ class OpenUnmix(nn.Module):
         # and encode to (nb_frames*nb_samples, hidden_size)
 
         x = x.reshape(-1, nb_channels*self.nb_bins)
-        if self.add_emb:
-            x = torch.cat((emb.reshape(-1, emb.shape[-1]), x), -1)
 
         x = self.fc1(x)
         # normalize every instance in a batch
@@ -148,8 +146,11 @@ class OpenUnmix(nn.Module):
         # lstm skip connection
         x = torch.cat([x, lstm_out[0]], -1)
 
+        if self.add_emb:
+            x = torch.cat((emb.reshape(-1, emb.shape[-1]), x.reshape(-1, x.shape[-1])), -1)
+
         # first dense stage + batch norm
-        x = self.fc2(x.reshape(-1, x.shape[-1]))
+        x = self.fc2(x)
         x = self.bn2(x)
 
         x = F.relu(x)

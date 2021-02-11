@@ -20,6 +20,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         dtype=torch.float32,
         seed=42,
         add_emb=None,
+        emb_feature=None,
         *args, **kwargs
     ):
 
@@ -34,6 +35,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
         self.random_track_mix = random_track_mix
         self.root = root
         self.add_emb = add_emb
+        self.emb_feature=emb_feature
         self.mus = musdb.DB(
             root=root,
             is_wav=is_wav,
@@ -106,9 +108,9 @@ class MUSDBDataset(torch.utils.data.Dataset):
         if self.add_emb:
             vgg_time = (int(np.round(track.chunk_start/0.96)))
             if self.split == 'train':
-                vgg = np.load(os.path.join(self.root, 'vggish', track.name+'.npy'))[vgg_time: vgg_time+6]
+                vgg = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy'))[vgg_time: vgg_time+6].T[None,]
             else:
-                vgg = np.load(os.path.join(self.root, 'vggish', track.name+'.npy'))
+                vgg = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy')).T[None,]
 
             return x, y, index // self.samples_per_track, vgg
         else:

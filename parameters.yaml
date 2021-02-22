@@ -30,7 +30,7 @@ sf2_dir: '../data/sf2/'
 target: 'vocals' # which target source to train
 seq_dur: 6 # duration of each chunk
 samples_per_track: 64 #64 # how many sample per song
-use_norm: True
+use_norm: False
 n_channels: 2
 add_emb: True
 emb_feature: 'salience' #vggish / sidd_att

@@ -13,6 +13,10 @@ from utils.augmentation import _augment_freq_masking
 import tqdm
 import sys
 import time
+import matplotlib.pyplot as plt
+import librosa.display
+import librosa
+
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -70,6 +74,11 @@ class Separator(object):
             elif self.hparams.emb_feature == 'salience':
                 emb = batch[2].permute(0, 3, 1, 2)
                 emb = emb.reshape(emb.shape[0], emb.shape[1], -1).permute(1, 0, 2)[: mix_mag.shape[-1]]
+                #fig, axes = plt.subplots(2, figsize=(10,5))
+                #axes[0].imshow(emb[:,0].T.detach().cpu().numpy(), aspect='auto', origin='lower')
+                #librosa.display.specshow(librosa.amplitude_to_db(mix_mag[0].mean(0).detach().cpu().numpy(),ref=np.max), y_axis='log', x_axis='time', ax=axes[1])
+                #print(batch[3][0].data)
+                #plt.savefig(f'pic/{batch[3][0].data.detach().cpu().numpy()}.png')
 
         else:
             emb = None
@@ -111,7 +120,7 @@ class Separator(object):
             else:
                 emb = None
             self.optimizer.zero_grad()
-            loss = self.forward((x, y, emb), 'tr')
+            loss = self.forward((x, y, emb, data[2]), 'tr')
             loss.backward()
             self.optimizer.step()
             losses.update(loss.item(), x.shape[1])
@@ -134,7 +143,7 @@ class Separator(object):
                     emb = data[3].to(self.use_device)
                 else:
                     emb = None
-                loss = self.forward((x, y, emb), 'va')
+                loss = self.forward((x, y, emb, data[2]), 'va')
                 losses.update(loss.item(), x.shape[1])
         return losses.avg
 

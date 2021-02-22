@@ -112,9 +112,9 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 feature_start_time = (int(np.round(track.chunk_start/0.96)))
                 feature_end_time = feature_start_time + 6
             elif self.emb_feature == 'salience':
-                feature_start_time = (int(np.round(track.chunk_start*2))) 
+                feature_start_time = (int(np.round(track.chunk_start*self.sample_rate/256))) 
                 feature_end_time = feature_start_time + 1020
-    
+
             if self.split == 'train':
                 feature = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy'))[feature_start_time: feature_end_time].T[None,]
             else:

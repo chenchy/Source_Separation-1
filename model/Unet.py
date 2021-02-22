@@ -71,14 +71,14 @@ class Encode(nn.Module):
 class Decode(nn.Module):
     def __init__(self, nb_channels):
         super(Decode, self).__init__()
-        f_size = 16
+        f_size = 16 
         k_size = (3,3)
         p_size = (1,1)
         ds_k = (3,1)
         ds_s = (3,1)
-        self.d_block2 = d_block(f_size * 5,f_size*2,False,k_size,p_size,ds_k,ds_s)
-        self.d_block3 = d_block(f_size * 3,f_size,False,k_size,p_size,ds_k,ds_s)
-        self.d_block4 = d_block(f_size, nb_channels,True,k_size,p_size,ds_k,ds_s)
+        self.d_block2 = d_block(80,f_size*2,False,k_size,p_size,ds_k,ds_s)
+        self.d_block3 = d_block(48,f_size,False,k_size,p_size,ds_k,ds_s)
+        self.d_block4 = d_block(16,nb_channels,True,k_size,p_size,ds_k,ds_s)
 
     def forward(self, x, idx, s, c):
         x = self.d_block2(x,idx[2],s[2],False,c[2])
@@ -90,9 +90,9 @@ class Unet(nn.Module):
     def __init__(self, n_fft=4096, max_bin=None, input_mean=None, input_scale=None,):
         super(Unet, self).__init__()
 
-        self.nb_output_bins = n_fft // 2 + 1
         nb_channels = 2
 
+        self.nb_output_bins = n_fft // 2 + 1
         if max_bin:
             self.nb_bins = max_bin
         else:

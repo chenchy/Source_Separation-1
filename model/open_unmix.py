@@ -47,10 +47,9 @@ class OpenUnmix(nn.Module):
         #    self.transform = nn.Sequential(self.stft, self.spec)
 
         if add_emb:
-            inp_feature = hidden_size*2 + 128
-            self.emb_fc1 = Linear(128, 64, bias=False)
-        else:
-            inp_feature = hidden_size*2
+            #self.emb_fc1 = Linear(128, 64, bias=False)
+            self.emb_conv1 = nn.Conv1d(360, 64, 1) 
+       
 
         self.fc1 = Linear(
             self.nb_bins*nb_channels, hidden_size,
@@ -74,13 +73,12 @@ class OpenUnmix(nn.Module):
         )
 
         self.fc2 = Linear(
-            in_features=inp_feature,
+            in_features=hidden_size*2 + 64,
             out_features=hidden_size,
             bias=False
         )
 
         self.bn2 = BatchNorm1d(hidden_size)
-
         self.fc3 = Linear(
             in_features=hidden_size,
             out_features=self.nb_output_bins*nb_channels,
@@ -145,9 +143,13 @@ class OpenUnmix(nn.Module):
 
         # lstm skip connection
         x = torch.cat([x, lstm_out[0]], -1)
+        x = x.reshape(-1, x.shape[-1])
 
         if self.add_emb:
-            x = torch.cat((emb.reshape(-1, emb.shape[-1]), x.reshape(-1, x.shape[-1])), -1)
+            #emb = self.emb_fc1(emb.reshape(-1, emb.shape[-1]))
+            emb = self.emb_conv1(emb.permute(0, 2, 1)).permute(0, 2, 1)
+            emb = emb.reshape(-1, emb.shape[-1])
+            x = torch.cat((emb, x), -1)
 
         # first dense stage + batch norm
         x = self.fc2(x)

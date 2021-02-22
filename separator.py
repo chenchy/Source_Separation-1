@@ -61,10 +61,15 @@ class Separator(object):
         tar_stft, tar_mag = self.transform(tar_audio)
 
         if self.hparams.add_emb:
-            emb = batch[2].permute(0, 3, 1, 2)
-            emb = emb.reshape(emb.shape[0], emb.shape[1], -1)
-            mul = int(mix_mag.shape[-1]//emb.shape[1])
-            emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: mix_mag.shape[-1]]
+
+            if self.hparams.emb_feature  == 'vggish' or self.hparams.emb_feature == 'sidd_att':
+                emb = batch[2].permute(0, 3, 1, 2)
+                emb = emb.reshape(emb.shape[0], emb.shape[1], -1)
+                mul = int(mix_mag.shape[-1]//emb.shape[1])
+                emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: mix_mag.shape[-1]]
+            elif self.hparams.emb_feature == 'salience':
+                emb = batch[2].permute(0, 3, 1, 2)
+                emb = emb.reshape(emb.shape[0], emb.shape[1], -1).permute(1, 0, 2)[: mix_mag.shape[-1]]
 
         else:
             emb = None
@@ -146,15 +151,17 @@ class Separator(object):
         source_names = [self.hparams.target, 'accompaniment']
         oup_list = []        
         X_stft, X_mag = self.transform(audio_torch)
+
         if self.hparams.add_emb:
-            emb = emb.to(self.use_device)
-            mul = X_mag.shape[-1]//emb.shape[1]
-            emb = torch.repeat_interleave(emb, (mul+1)*emb.shape[1], 1).permute(1, 0, 2)[: X_mag.shape[-1]]
+            emb = emb.to(self.use_device).permute(0, 3, 1, 2)
+            emb = emb.reshape(emb.shape[0], emb.shape[1], -1)
+            mul = int(X_mag.shape[-1]//emb.shape[1])
+            emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: X_mag.shape[-1]]
 
         chunk_size = X_mag.shape[-1]//5
         for i in range(5):
             if self.hparams.add_emb:
-                pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone(), emb[i*chunk_size:(i+1)*chunk_size:]).cpu().detach().numpy()
+                pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone(), emb[i*chunk_size:(i+1)*chunk_size]).cpu().detach().numpy()
             else:
                 pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()).cpu().detach().numpy()
 
@@ -251,7 +258,6 @@ class Separator(object):
         default_params = yaml.safe_load(open(default_params))
         inp_harams = Namespace(**default_params)
         inp_harams.use_norm = False
-
         separator = cls(inp_harams)
 
         model_dict = separator.model.state_dict()

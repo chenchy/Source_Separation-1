@@ -3,6 +3,7 @@ import musdb
 import random
 import os
 import numpy as np
+from skimage.measure import block_reduce
 
 class MUSDBDataset(torch.utils.data.Dataset):
     def __init__(
@@ -106,13 +107,22 @@ class MUSDBDataset(torch.utils.data.Dataset):
             )
 
         if self.add_emb:
-            vgg_time = (int(np.round(track.chunk_start/0.96)))
+            
+            if self.emb_feature == 'vggish' or self.emb_feature == 'sidd_att':
+                feature_start_time = (int(np.round(track.chunk_start/0.96)))
+                feature_end_time = feature_start_time + 6
+            elif self.emb_feature == 'salience':
+                feature_start_time = (int(np.round(track.chunk_start*2))) 
+                feature_end_time = feature_start_time + 1020
+    
             if self.split == 'train':
-                vgg = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy'))[vgg_time: vgg_time+6].T[None,]
+                feature = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy'))[feature_start_time: feature_end_time].T[None,]
             else:
-                vgg = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy')).T[None,]
+                feature = np.load(os.path.join(self.root, self.emb_feature, track.name+'.npy')).T[None,]
 
-            return x, y, index // self.samples_per_track, vgg
+            if self.emb_feature == 'salience':
+                feature = block_reduce(feature, (1, 1, 4), np.mean)
+            return x, y, index // self.samples_per_track, feature
         else:
             return x, y, index // self.samples_per_track
         

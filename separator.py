@@ -158,6 +158,7 @@ class Separator(object):
         audio_torch = mix_audio.float().to(self.use_device)
 
         source_names = [self.hparams.target, 'accompaniment']
+        track = self.loaders['test'].mus.tracks[track_id]
         oup_list = []        
         X_stft, X_mag = self.transform(audio_torch)
 
@@ -185,24 +186,25 @@ class Separator(object):
         X_stft = X_stft.detach().cpu().numpy()
         X_stft = X_stft[..., 0] + X_stft[..., 1]*1j
         X_stft = X_stft[0].transpose(2, 1, 0)
-        pre_mag = np.concatenate((pre_mag, np.abs(X_stft)[..., None] - pre_mag), axis=-1)
+        #pre_mag = np.concatenate((pre_mag, np.abs(X_stft)[..., None] - pre_mag), axis=-1)
+
         # frames, bins, channels, sources
         pre_stft = pre_mag * np.exp(1j*np.angle(X_stft[..., None]))
 
         audio_estimates = []
-        for j, name in enumerate(source_names):
-            _, audio_hat = scipy.signal.istft(
-                pre_stft[..., j].T / (self.hparams.n_fft / 2),
-                44100,
-                nperseg=self.hparams.n_fft,
-                noverlap=self.hparams.n_fft - self.hparams.hop_length,
-                boundary=True
-            )
-            audio_estimates.append(audio_hat.T)
+        #for j, name in enumerate(source_names):
+        _, audio_hat = scipy.signal.istft(
+            pre_stft[..., 0].T / (self.hparams.n_fft / 2),
+            44100,
+            nperseg=self.hparams.n_fft,
+            noverlap=self.hparams.n_fft - self.hparams.hop_length,
+            boundary=True
+        )
+        audio_estimates.append(audio_hat.T)
+        audio_estimates.append(track.audio[:audio_hat.shape[-1]]-audio_hat.T)
 
 
         # gather reference tracks
-        track = self.loaders['test'].mus.tracks[track_id]
         ref_tar = track.targets[self.hparams.target].audio
         ref_res = track.audio - track.targets[self.hparams.target].audio
         if ref_tar.shape[1] != self.hparams.n_channels:

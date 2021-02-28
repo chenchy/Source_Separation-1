@@ -73,14 +73,14 @@ class OpenUnmix(nn.Module):
         )
 
         self.fc2 = Linear(
-            in_features=hidden_size*2 + 64,
+            in_features=hidden_size*2,
             out_features=hidden_size,
             bias=False
         )
 
         self.bn2 = BatchNorm1d(hidden_size)
         self.fc3 = Linear(
-            in_features=hidden_size,
+            in_features=hidden_size + 64,
             out_features=self.nb_output_bins*nb_channels,
             bias=False
         )
@@ -145,17 +145,18 @@ class OpenUnmix(nn.Module):
         x = torch.cat([x, lstm_out[0]], -1)
         x = x.reshape(-1, x.shape[-1])
 
-        if self.add_emb:
-            #emb = self.emb_fc1(emb.reshape(-1, emb.shape[-1]))
-            emb = self.emb_conv1(emb.permute(0, 2, 1)).permute(0, 2, 1)
-            emb = emb.reshape(-1, emb.shape[-1])
-            x = torch.cat((emb, x), -1)
-
         # first dense stage + batch norm
         x = self.fc2(x)
         x = self.bn2(x)
 
         x = F.relu(x)
+
+        if self.add_emb:
+            #emb = self.emb_fc1(emb.reshape(-1, emb.shape[-1]))
+            #emb = self.emb_conv1(emb.permute(0, 2, 1)).permute(0, 2, 1)
+            emb = self.emb_conv1(emb.permute(1, 2, 0)).permute(2, 0, 1)
+            emb = emb.reshape(-1, emb.shape[-1])
+            x = torch.cat((emb, x), -1)
 
         # second dense stage + layer norm
         x = self.fc3(x)

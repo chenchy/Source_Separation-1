@@ -19,7 +19,7 @@ def main(hparams, yaml_hparam):
     valid_losses = []
     best_epoch = 0
 
-    ckpt_path = os.path.join('logger', hparams.model_name+'_3layers_emb_both_vgg')
+    ckpt_path = os.path.join('logger', hparams.model_name+'_3layers_emb_vgg')
     if not os.path.exists(ckpt_path):
         os.makedirs(ckpt_path)
 
@@ -29,14 +29,14 @@ def main(hparams, yaml_hparam):
     separator = Separator(hparams)
     for epoch in t:
         t.set_description("Training Epoch")
-        train_loss = separator.training_step()
+        train_loss, emb_pos_loss, emb_neg_loss = separator.training_step()
         valid_loss = separator.validation_step()
         separator.scheduler.step(valid_loss)
         train_losses.append(train_loss)
         valid_losses.append(valid_loss)
 
         t.set_postfix(
-            train_loss=train_loss, val_loss=valid_loss
+            train_loss=train_loss, e_pos=emb_pos_loss, e_neg=emb_neg_loss, val_loss=valid_loss
         )
         print(valid_loss)
         stop = separator.es.step(valid_loss)

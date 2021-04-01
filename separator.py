@@ -71,55 +71,63 @@ class Separator(object):
 
         if self.hparams.use_emb and partition=='tr':
             pre_mag, emb = self.model(mix_mag, mix_mag_detach, tar_mag)
-            emb_loss = 0
+            emb_loss_neg = 0
+            emb_loss_pos = 0
             feature_num = emb[0].shape[0]
 
             # different group don't close to each other
-            emb_loss += torch.mean(self.emb_loss(emb[0], emb[1], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[1], emb[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[2], emb[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[0], emb[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[0], emb[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[1], emb[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            
+            emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[2], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            '''
             # same group close to each other
             for i in range(4):
-                emb_loss += torch.mean(self.emb_loss(emb[i][:int(feature_num//2)], emb[i][int(feature_num//2):], torch.zeros(1).to(mix_mag.device)+1).view(feature_num//2, -1).sum(dim=-1))
-            
+                emb_loss_pos += torch.mean(self.emb_loss(emb[i][:int(feature_num//2)], emb[i][int(feature_num//2):], torch.ones(int(feature_num//2)).to(mix_mag.device)).view(feature_num//2, -1).sum(dim=-1))
+            '''
+
             # same group close to vgg
             for i in range(4):
-                emb_loss += torch.mean(self.emb_loss(emb[i], vgg[i], torch.zeros(1).to(self.use_device)+1).view(mix_mag.shape[0], -1).sum(dim=-1))
-           
+                emb_loss_pos += torch.mean(self.emb_loss(emb[i], vgg[i]/225, torch.ones(feature_num).to(self.use_device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            
             # different group don't close to vgg
-            emb_loss += torch.mean(self.emb_loss(emb[0], vgg[1], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[1], vgg[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[2], vgg[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[0], vgg[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[0], vgg[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-            emb_loss += torch.mean(self.emb_loss(emb[1], vgg[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
-             
+            #emb_loss += torch.mean(self.emb_loss(emb[0], vgg[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            #emb_loss += torch.mean(self.emb_loss(emb[1], vgg[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            #emb_loss += torch.mean(self.emb_loss(emb[2], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            #emb_loss += torch.mean(self.emb_loss(emb[0], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            #emb_loss += torch.mean(self.emb_loss(emb[0], vgg[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            #emb_loss += torch.mean(self.emb_loss(emb[1], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+        
 
-            loss += emb_loss
+            loss += (emb_loss_pos + emb_loss_neg)
+            loss += self.loss_func(pre_mag, tar_mag)
+            return (loss, emb_loss_pos, emb_loss_neg)
 
         else:
             pre_mag, _ = self.model(mix_mag, mix_mag_detach, tar_mag)
 
-        loss += self.loss_func(pre_mag, tar_mag)
+            loss += self.loss_func(pre_mag, tar_mag)
 
-        return loss
+            return loss
 
     def training_step(self):
         losses = AverageMeter()
+        emb_pos_losses = AverageMeter()
+        emb_neg_losses = AverageMeter()
         self.model.train()
         pbar = tqdm.tqdm(self.train_set, disable=False)
         for x, y, _, vgg in pbar:
             x, y, vgg = x.to(self.use_device), y.to(self.use_device), vgg.to(self.use_device)
             self.optimizer.zero_grad()
-            loss = self.forward((x, y, vgg), 'tr')
+            loss, emb_loss_pos, emb_loss_neg = self.forward((x, y, vgg), 'tr')
             loss.backward()
             self.optimizer.step()
             losses.update(loss.item(), x.shape[1])
-        return losses.avg
+            emb_pos_losses.update(emb_loss_pos.item(), x.shape[1])
+            emb_neg_losses.update(emb_loss_neg.item(), x.shape[1])
+        return losses.avg, emb_pos_losses.avg, emb_neg_losses.avg
 
 
     def validation_step(self):

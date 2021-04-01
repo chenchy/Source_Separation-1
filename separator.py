@@ -11,12 +11,6 @@ import museval
 from utils.general_utils import get_statistics, bandwidth_to_max_bin, EarlyStopping, AverageMeter
 from utils.augmentation import _augment_freq_masking
 import tqdm
-import sys
-import time
-import matplotlib.pyplot as plt
-import librosa.display
-import librosa
-
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -37,206 +31,160 @@ class Separator(object):
         hparams.max_bin = bandwidth_to_max_bin(self.hparams.sample_rate, self.hparams.n_fft, self.hparams.band_width)
 
         self.model = model_creator(hparams).to(self.use_device)
-        self.loss_func = loss_creator(hparams)
+        self.loss_func = loss_creator(hparams.loss_name)
 
         self.optimizer, self.scheduler = self._configure_optimizers()
         self.es = EarlyStopping(patience=hparams.early_stopping_patience)
 
         self.transform.to(self.use_device)
+
+        if self.hparams.use_emb:
+            self.emb_loss = loss_creator('cosEmb')
         
 
     def forward(self, batch, partition):
         oup_dict = {}
+        loss = 0
         
         # preprocessing
-        mix_audio, tar_audio = batch[0], batch[1]
-        
-        
-        mix_audio, tar_audio = mix_audio.float(), tar_audio.float()
-        if mix_audio.shape[1] != self.hparams.n_channels:
-            mix_audio = (mix_audio.sum(1) / mix_audio.shape[1]).unsqueeze(1)
-            tar_audio = (tar_audio.sum(1) / tar_audio.shape[1]).unsqueeze(1)
-        #if self.hparams.dataset_name == 'slakh':
-        #    mix_audio = mix_audio.permute(1, 0, 2)
-        #    tar_audio = tar_audio.permute(1, 0, 2)
-
-        batch_size = mix_audio.shape[0]
-        mix_stft, mix_mag = self.transform(mix_audio)
-        tar_stft, tar_mag = self.transform(tar_audio)
-
-        if self.hparams.add_emb:
-
-            if self.hparams.emb_feature  == 'vggish' or self.hparams.emb_feature == 'sidd_att':
-                emb = batch[2].permute(0, 3, 1, 2)
-                emb = emb.reshape(emb.shape[0], emb.shape[1], -1)
-                mul = int(mix_mag.shape[-1]//emb.shape[1])
-                emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: mix_mag.shape[-1]]
-            elif self.hparams.emb_feature == 'salience':
-                emb = batch[2].permute(0, 3, 1, 2)
-                emb = emb.reshape(emb.shape[0], emb.shape[1], -1).permute(1, 0, 2)[: mix_mag.shape[-1]]
-                #fig, axes = plt.subplots(2, figsize=(10,5))
-                #axes[0].imshow(emb[:,0].T.detach().cpu().numpy(), aspect='auto', origin='lower')
-                #librosa.display.specshow(librosa.amplitude_to_db(mix_mag[0].mean(0).detach().cpu().numpy(),ref=np.max), y_axis='log', x_axis='time', ax=axes[1])
-                #print(batch[3][0].data)
-                #plt.savefig(f'pic/{batch[3][0].data.detach().cpu().numpy()}.png')
-
-        else:
-            emb = None
-
         if partition == 'va':
-            chunk_size = mix_mag.shape[-1]//3
-            oup_list = []
-            for i in range(3):
-                # (batch, channel, n_features, n_frames)
-                mix_mag_detach = mix_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()
-                if self.hparams.add_emb:
-                    pre_mag = self.model(mix_mag[..., i*chunk_size:(i+1)*chunk_size], mix_mag_detach, emb[i*chunk_size:(i+1)*chunk_size])
-                else:
-                    pre_mag = self.model(mix_mag[..., i*chunk_size:(i+1)*chunk_size], mix_mag_detach)
-                oup_list.append(pre_mag)
-            pre_mag = torch.cat(oup_list, -1)
-            tar_mag = tar_mag[..., :pre_mag.shape[-1]]
+            mix_audio, tar_audio = batch
+            batch_size = mix_audio.shape[0]
+            mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+            tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+            mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, 2).permute(0, 2, 1)
+            tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, 2).permute(0, 2, 1)
         else:
-            # (batch, channel, n_features, n_frames)
-            mix_mag_detach = mix_mag.detach().clone()
+            mix_audio, tar_audio, vgg = batch
+            vgg = torch.repeat_interleave(vgg, torch.tensor([5, 5, 5, 5, 5, 6]).to(self.use_device), dim=2).permute(1, 0, 2, 3).reshape(4, -1, 128)
+        if len(tar_audio.shape) == 4:
+            tar_audio = tar_audio[:,:].reshape(-1, tar_audio.shape[2], tar_audio.shape[3])
+        mix_stft = self.transform(mix_audio)
+        tar_stft = self.transform(tar_audio)
+        mix_mag = mix_stft.pow(2).sum(-1).pow(1 / 2.0)
+        tar_mag = tar_stft.pow(2).sum(-1).pow(1 / 2.0)
+        # (batch, channel, n_features, n_frames)
+        mix_mag_detach = mix_mag.detach().clone()
 
-            if self.hparams.aug_freqmask:
-                mix_mag = _augment_freq_masking(mix_mag)
-            pre_mag = self.model(mix_mag, mix_mag_detach, emb)
+        if self.hparams.aug_freqmask:
+            mix_mag = _augment_freq_masking(mix_mag)
 
-        loss = self.loss_func(pre_mag, tar_mag)
+        if self.hparams.use_emb and partition=='tr':
+            pre_mag, emb = self.model(mix_mag, mix_mag_detach, tar_mag)
+            emb_loss = 0
+            feature_num = emb[0].shape[0]
+
+            # different group don't close to each other
+            emb_loss += torch.mean(self.emb_loss(emb[0], emb[1], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[1], emb[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[2], emb[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[0], emb[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[0], emb[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[1], emb[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            
+            # same group close to each other
+            for i in range(4):
+                emb_loss += torch.mean(self.emb_loss(emb[i][:int(feature_num//2)], emb[i][int(feature_num//2):], torch.zeros(1).to(mix_mag.device)+1).view(feature_num//2, -1).sum(dim=-1))
+            
+            # same group close to vgg
+            for i in range(4):
+                emb_loss += torch.mean(self.emb_loss(emb[i], vgg[i], torch.zeros(1).to(self.use_device)+1).view(mix_mag.shape[0], -1).sum(dim=-1))
+           
+            # different group don't close to vgg
+            emb_loss += torch.mean(self.emb_loss(emb[0], vgg[1], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[1], vgg[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[2], vgg[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[0], vgg[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[0], vgg[2], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss += torch.mean(self.emb_loss(emb[1], vgg[3], torch.zeros(1).to(mix_mag.device)-1).view(mix_mag.shape[0], -1).sum(dim=-1))
+             
+
+            loss += emb_loss
+
+        else:
+            pre_mag, _ = self.model(mix_mag, mix_mag_detach, tar_mag)
+
+        loss += self.loss_func(pre_mag, tar_mag)
 
         return loss
 
     def training_step(self):
         losses = AverageMeter()
         self.model.train()
-        st = time.time()
-        #pbar = tqdm.tqdm(self.train_set, disable=False)
-        for i, data in enumerate(self.train_set):
-            x, y = data[0].to(self.use_device), data[1].to(self.use_device)
-            if self.hparams.add_emb:
-                emb = data[3].to(self.use_device)
-            else:
-                emb = None
+        pbar = tqdm.tqdm(self.train_set, disable=False)
+        for x, y, _, vgg in pbar:
+            x, y, vgg = x.to(self.use_device), y.to(self.use_device), vgg.to(self.use_device)
             self.optimizer.zero_grad()
-            loss = self.forward((x, y, emb, data[2]), 'tr')
+            loss = self.forward((x, y, vgg), 'tr')
             loss.backward()
             self.optimizer.step()
             losses.update(loss.item(), x.shape[1])
-
-            sys.stdout.write('\r')
-            sys.stdout.write('| Iter[%4d/%4d]\tLoss %4f\tTime %d'%(i+1, len(self.train_set), loss.item(), time.time() - st))
-            sys.stdout.flush()
-
         return losses.avg
 
 
     def validation_step(self):
         losses = AverageMeter()
         self.model.eval()
-        pbar = tqdm.tqdm(self.val_set, disable=False)
         with torch.no_grad():
-            for data in pbar:
-                x, y = data[0].to(self.use_device), data[1].to(self.use_device)
-                if self.hparams.add_emb:
-                    emb = data[3].to(self.use_device)
-                else:
-                    emb = None
-                loss = self.forward((x, y, emb, data[2]), 'va')
+            for x, y, _ in self.val_set:
+                x, y = x.to(self.use_device), y.to(self.use_device)
+                loss = self.forward((x, y), 'va')
                 losses.update(loss.item(), x.shape[1])
         return losses.avg
 
-    def test_step(self, mix_audio, tar_audio, track_id, emb=None):
+    def test_step(self, mix_audio, tar_audio, track_id):
         import norbert
         import scipy.signal
         import museval
         import numpy as np
 
         self.model.eval()
-        # preprocessing feature
-        audio_torch = mix_audio.float().to(self.use_device)
 
-        source_names = [self.hparams.target, 'accompaniment']
-        track = self.loaders['test'].mus.tracks[track_id]
-        oup_list = []        
-        X_stft, X_mag = self.transform(audio_torch)
+        mix_stft = self.transform(mix_audio)
+        mix_mag = mix_stft.pow(2).sum(-1).pow(1 / 2.0)
 
-        if self.hparams.add_emb:
-            emb = emb.to(self.use_device).permute(0, 3, 1, 2)
-            emb = emb.reshape(emb.shape[0], emb.shape[1], -1)
-            mul = int(X_mag.shape[-1]//emb.shape[1])
-            emb = torch.repeat_interleave(emb, (mul+1), 1).permute(1, 0, 2)[: X_mag.shape[-1]]
-
-        chunk_size = X_mag.shape[-1]//5
-        for i in range(5):
-            if self.hparams.add_emb:
-                pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone(), emb[i*chunk_size:(i+1)*chunk_size]).cpu().detach().numpy()
-            else:
-                pre_mag = self.model(X_mag[..., i*chunk_size:(i+1)*chunk_size], X_mag[..., i*chunk_size:(i+1)*chunk_size].detach().clone()).cpu().detach().numpy()
-
-            oup_list.append(pre_mag)
-        #pre_mag = self.model(X_mag, X_mag.detach().clone())
-        pre_mag = np.concatenate(oup_list, -1)
-        X_stft = X_stft[:, :, :, :pre_mag.shape[-1]]
-        # output is nb_samples, nb_channels, nb_bins, nb_frames
-
-        pre_mag = np.transpose(pre_mag, (3, 2, 1, 0))
-
-        X_stft = X_stft.detach().cpu().numpy()
-        X_stft = X_stft[..., 0] + X_stft[..., 1]*1j
-        X_stft = X_stft[0].transpose(2, 1, 0)
-        #pre_mag = np.concatenate((pre_mag, np.abs(X_stft)[..., None] - pre_mag), axis=-1)
-
-        # frames, bins, channels, sources
-        pre_stft = pre_mag * np.exp(1j*np.angle(X_stft[..., None]))
-
-        audio_estimates = []
-        #for j, name in enumerate(source_names):
-        _, audio_hat = scipy.signal.istft(
-            pre_stft[..., 0].T / (self.hparams.n_fft / 2),
-            44100,
-            nperseg=self.hparams.n_fft,
-            noverlap=self.hparams.n_fft - self.hparams.hop_length,
-            boundary=True
-        )
-        audio_estimates.append(audio_hat.T)
-        audio_estimates.append(track.audio[:audio_hat.shape[-1]]-audio_hat.T)
-
-
-        # gather reference tracks
-        ref_tar = track.targets[self.hparams.target].audio
-        ref_res = track.audio - track.targets[self.hparams.target].audio
-        if ref_tar.shape[1] != self.hparams.n_channels:
-            ref_tar = (ref_tar.sum(1) / ref_tar.shape[1])[..., None]
-            ref_res = (ref_res.sum(1) / ref_res.shape[1])[..., None]
-        audio_reference = [ref_tar, ref_res]
-        #scores = museval.eval_mus_track(track, audio_estimates)
-
-        SDR, ISR, SIR, SAR = museval.evaluate(
-            audio_reference,
-            audio_estimates,
-            win=int(1.0*44100),
-            hop=int(1.0*44100),
-            mode='v4'
-        )
-        scores = museval.aggregate.TrackStore(win=1.0, hop=1.0, track_name=track.name)
-        for i, target in enumerate(source_names):
-            values = {
-                "SDR": SDR[i].tolist(),
-                "SIR": SIR[i].tolist(),
-                "ISR": ISR[i].tolist(),
-                "SAR": SAR[i].tolist()
-            }
-
-            scores.add_target(
-                target_name=target,
-                values=values
-            )
+        #pre_mag = self.model(mix_mag, mix_mag.detach().clone())
+        pre_mag_list = []
+        chunk_size = int(mix_mag.shape[-1] // 5) + 1
+        for i in range(mix_mag.shape[-1] // chunk_size + 1):
+            inp = mix_mag[..., i * chunk_size : (i + 1) * chunk_size].to(self.use_device)
+            oup, emb = self.model(inp, inp.detach(), inp)
+            pre_mag_list.append(oup.squeeze().detach().cpu().numpy())
         
+        '''
+            np.save(f'tmp/0_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[0].detach().cpu().numpy())
+            np.save(f'tmp/1_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[1].detach().cpu().numpy())
+            np.save(f'tmp/2_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[2].detach().cpu().numpy())
+            np.save(f'tmp/3_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[3].detach().cpu().numpy())
+        return None
+        '''
+        pre_mag = np.concatenate(pre_mag_list, -1).T
+
+        mix_stft = mix_stft.squeeze().detach().cpu().numpy()
+        mix_stft = mix_stft[..., 0] + mix_stft[..., 1]*1j
+        pre_residual = mix_mag.squeeze().permute(2, 1, 0).detach().cpu().numpy() - pre_mag
+        pre_stft = np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1) * np.exp(1j*np.angle(np.transpose(mix_stft, (2, 1, 0))[..., None]))
+        #pre_stft = norbert.wiener(np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1), 
+        #                          mix_stft.T.astype(np.complex128), 1, use_softmask=False)
+        estimates = {}
+        names = ['vocals', 'accompaniment']
+        for i, name in enumerate(names):
+
+            t, pre_audio = scipy.signal.istft(
+                pre_stft[...,i].T / (self.hparams.n_fft / 2),
+                44100,
+                nperseg=self.hparams.n_fft,
+                noverlap=self.hparams.n_fft - self.hparams.hop_length,
+                boundary=True
+            )
+            estimates[name] = pre_audio.T
+
+        track = self.loaders['test'].mus.tracks[track_id]
+        scores = museval.eval_mus_track(track, estimates)
         print(scores)
         return scores
-
+        return None
+        
 
     def _configure_optimizers(self):
 
@@ -263,16 +211,18 @@ class Separator(object):
 
     @classmethod
     def load_from_checkpoint(cls, checkpoint_path, default_params):
-        checkpoint = torch.load(checkpoint_path) #, map_location=lambda storage, loc: storage)
+        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
         import yaml
         from argparse import Namespace
         default_params = yaml.safe_load(open(default_params))
         inp_harams = Namespace(**default_params)
         inp_harams.use_norm = False
+
         separator = cls(inp_harams)
+        pretrained_dict = checkpoint
 
         model_dict = separator.model.state_dict()
-        pretrained_dict = {k: v for k, v in checkpoint.items() if k in model_dict}
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model_dict.update(pretrained_dict) 
         separator.model.load_state_dict(model_dict)
 

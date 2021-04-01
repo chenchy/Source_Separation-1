@@ -1,7 +1,8 @@
 from dataloader.musdb_loader import MUSDBDataset
 from dataloader.slakh_loader import SlakhDataset
+
 from utils.augmentation import Compose
-from model import tcn, open_unmix, Unet, spleeter
+from model import tcn, open_unmix, Unet, spleeter, tfc_tdf
 import torch
 from utils.augmentation import Compose, _augment_gain, _augment_channelswap, _augment_pitchShift
 from model.preprocess import STFT
@@ -17,35 +18,39 @@ def preprocess_creator(hparams):
 def model_creator(hparams):
     if hparams.model_name == 'tcn':
         model = tcn.tcn(hparams.max_bin, hparams.n_features, hparams.n_fft//2+1,
-                    hparams.kernal_size, hparams.n_stacks, hparams.n_blocks, hparams.max_bin, hparams.mean, hparams.std)
+                    hparams.kernal_size, hparams.n_stacks, hparams.n_blocks, hparams.max_bin)
 
     if hparams.model_name == 'unet':
-        model = Unet.Unet(hparams.n_fft, hparams.max_bin, hparams.mean, hparams.std)
+        model = Unet.Unet(hparams.n_fft)
 
     if hparams.model_name == 'spleeter':
-        model = spleeter.Spleeter()
+        model = spleeter.Spleeter(hparams.use_emb)
 
     if hparams.model_name == 'open-unmix':
-        model = open_unmix.OpenUnmix(n_fft=hparams.n_fft, 
-                                    n_hop=hparams.hop_length,
-                                    nb_channels=hparams.n_channels,
+        model = open_unmix.OpenUnmix(nb_channels=2,
                                     hidden_size=hparams.n_features, 
+                                    n_fft=hparams.n_fft, 
+                                    n_hop=hparams.hop_length,
                                     input_mean=hparams.mean,
                                     input_scale=hparams.std,
                                     max_bin=hparams.max_bin,
-                                    sample_rate=hparams.sample_rate,
-                                    add_emb=hparams.add_emb,
-                                    )
+                                    sample_rate=hparams.sample_rate)
+
+    if hparams.model_name == 'tfc_tdf':
+        model = tfc_tdf.TFC_TDF(24, 5, 24, 3, 3, 2048)
 
     return model
 
 
-def loss_creator(hparams):
-    if hparams.loss_name == 'l1':
+def loss_creator(loss_name):
+    if loss_name == 'l1':
         loss_func = torch.nn.L1Loss()
 
-    elif hparams.loss_name == 'mse':
+    elif loss_name == 'mse':
         loss_func = torch.nn.MSELoss()
+
+    elif loss_name == 'cosEmb':
+        loss_func = torch.nn.CosineEmbeddingLoss(reduction='none')
 
     return loss_func
 
@@ -59,9 +64,9 @@ def dataset_creator(hparams, partition):
             [globals()[aug] for aug in aug_list]
         )
 
-    if hparams.dataset_name == 'musdb' or partition == 'test':
+    if hparams.dataset_name == 'musdb':
         dataset_kwargs = {
-            'root': '../data/MUSDB18-HQ/', #hparams.data_path,
+            'root': hparams.data_path,
             'is_wav': True,
             'subsets': 'train' if partition!='test' else 'test',
             'target': hparams.target,
@@ -74,8 +79,7 @@ def dataset_creator(hparams, partition):
             samples_per_track=hparams.samples_per_track if partition=='train' else 1,
             seq_duration=hparams.seq_dur if partition=='train' else None,
             source_augmentations=source_augmentations if partition=='train' else None,
-            random_track_mix=True if partition=='train' else False, add_emb = hparams.add_emb, 
-            emb_feature=hparams.emb_feature,
+            random_track_mix=True if partition=='train' else False,
             **dataset_kwargs
         )
 

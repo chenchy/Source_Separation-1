@@ -1,4 +1,5 @@
 __pycache__/
 logger/
 eval_dir/
-
+tmp/
+tmp_ori/

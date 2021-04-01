@@ -117,10 +117,10 @@ def get_statistics(args, dataset, preprocessor):
     dataset_scaler.seq_duration = None
     pbar = tqdm.tqdm(range(len(dataset_scaler)))
     for ind in pbar:
-        x, y = dataset_scaler[ind][0], dataset_scaler[ind][1]
+        x, y, _ = dataset_scaler[ind]
         pbar.set_description("Compute dataset statistics")
-        _, X = preprocessor((x.sum(0)/2)[None, None, ...])
-        X = X.permute(3, 0, 1, 2).detach().cpu().numpy()
+        X = preprocessor((x.sum(0)/2)[None, None, ...])
+        X = X.pow(2).sum(-1).pow(1 / 2.0).permute(3, 0, 1, 2).detach().cpu().numpy()
         scaler.partial_fit(np.squeeze(X))
 
     # set inital input scaler values
@@ -145,14 +145,11 @@ def save_checkpoint(state, is_best, path, target):
         # save just the weights
         torch.save(
             state['state_dict'],
-            os.path.join(path, target + '.pth'),
-            _use_new_zipfile_serialization=False
+            os.path.join(path, target + '.pth')
         )
 
 def target_to_midi_number(target):
     if target == 'bass':
-        numbers = np.arange(32, 39)
-    elif target == 'drums':
-        numbers = [0]
+        numbers = np.arange(33, 40)
 
     return numbers

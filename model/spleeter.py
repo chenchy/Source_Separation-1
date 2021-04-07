@@ -117,7 +117,8 @@ class Spleeter(nn.Module):
 
         for s in range(n_sources):
             x1, x2, x3, x4, x5, x6 = self.encoder_stacks[s](x)
-            emb.append(self.emb_transform(x3.permute(0, 3, 1, 2).reshape(-1, 16384)))
+            #emb.append(self.emb_transform(x3.permute(0, 3, 1, 2).reshape(-1, 16384)))
+            emb.append(x3.permute(0, 3, 1, 2).reshape(-1, 16384))
             oup = self.decoder(x, x1, x2, x3, x4, x5, x6)
             oup = F.sigmoid(oup) * mix
             output.append(oup)

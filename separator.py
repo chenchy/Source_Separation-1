@@ -11,6 +11,7 @@ import museval
 from utils.general_utils import get_statistics, bandwidth_to_max_bin, EarlyStopping, AverageMeter
 from utils.augmentation import _augment_freq_masking
 import tqdm
+import soundfile as sf
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -36,7 +37,7 @@ class Separator(object):
         self.optimizer, self.scheduler = self._configure_optimizers()
         self.es = EarlyStopping(patience=hparams.early_stopping_patience)
 
-        self.transform.to(self.use_device)
+        self.transform#.to(self.use_device)
 
         if self.hparams.use_emb:
             self.emb_loss = loss_creator('cosEmb')
@@ -51,7 +52,7 @@ class Separator(object):
             mix_audio, tar_audio = batch
             batch_size = mix_audio.shape[0]
             mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-            tar_audio = tar_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
+            tar_audio = tar_audio[..., :int(tar_audio.shape[-1] // 8) * 8]
             mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, 2).permute(0, 2, 1)
             tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, 2).permute(0, 2, 1)
         else:
@@ -86,22 +87,22 @@ class Separator(object):
             # same group close to each other
             for i in range(4):
                 emb_loss_pos += torch.mean(self.emb_loss(emb[i][:int(feature_num//2)], emb[i][int(feature_num//2):], torch.ones(int(feature_num//2)).to(mix_mag.device)).view(feature_num//2, -1).sum(dim=-1))
-            '''
-
+            
+            
             # same group close to vgg
             for i in range(4):
-                emb_loss_pos += torch.mean(self.emb_loss(emb[i], vgg[i]/225, torch.ones(feature_num).to(self.use_device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                emb_loss_pos += 0.01 * torch.mean(self.emb_loss(emb[i], vgg[i]/225, torch.ones(feature_num).to(self.use_device)).view(mix_mag.shape[0], -1).sum(dim=-1))
             
             # different group don't close to vgg
-            #emb_loss += torch.mean(self.emb_loss(emb[0], vgg[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-            #emb_loss += torch.mean(self.emb_loss(emb[1], vgg[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-            #emb_loss += torch.mean(self.emb_loss(emb[2], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-            #emb_loss += torch.mean(self.emb_loss(emb[0], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-            #emb_loss += torch.mean(self.emb_loss(emb[0], vgg[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-            #emb_loss += torch.mean(self.emb_loss(emb[1], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-        
+            emb_loss_neg += torch.mean(self.emb_loss(emb[0], vgg[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[1], vgg[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[2], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[0], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[0], vgg[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            emb_loss_neg += torch.mean(self.emb_loss(emb[1], vgg[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+            '''
 
-            loss += (emb_loss_pos + emb_loss_neg)
+            loss += (emb_loss_pos + emb_loss_neg * 2)
             loss += self.loss_func(pre_mag, tar_mag)
             return (loss, emb_loss_pos, emb_loss_neg)
 
@@ -125,7 +126,7 @@ class Separator(object):
             loss.backward()
             self.optimizer.step()
             losses.update(loss.item(), x.shape[1])
-            emb_pos_losses.update(emb_loss_pos.item(), x.shape[1])
+            #emb_pos_losses.update(emb_loss_pos.item(), x.shape[1])
             emb_neg_losses.update(emb_loss_neg.item(), x.shape[1])
         return losses.avg, emb_pos_losses.avg, emb_neg_losses.avg
 
@@ -153,17 +154,17 @@ class Separator(object):
 
         #pre_mag = self.model(mix_mag, mix_mag.detach().clone())
         pre_mag_list = []
-        chunk_size = int(mix_mag.shape[-1] // 5) + 1
+        chunk_size = int(mix_mag.shape[-1] // 15) + 1
         for i in range(mix_mag.shape[-1] // chunk_size + 1):
             inp = mix_mag[..., i * chunk_size : (i + 1) * chunk_size].to(self.use_device)
             oup, emb = self.model(inp, inp.detach(), inp)
             pre_mag_list.append(oup.squeeze().detach().cpu().numpy())
         
-        '''
-            np.save(f'tmp/0_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[0].detach().cpu().numpy())
-            np.save(f'tmp/1_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[1].detach().cpu().numpy())
-            np.save(f'tmp/2_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[2].detach().cpu().numpy())
-            np.save(f'tmp/3_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[3].detach().cpu().numpy())
+            '''
+            np.save(f'tmp_ori/0_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[0].detach().cpu().numpy())
+            np.save(f'tmp_emb/1_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[1].detach().cpu().numpy())
+            np.save(f'tmp_emb/2_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[2].detach().cpu().numpy())
+            np.save(f'tmp_emb/3_{str(i)}_{str(track_id.detach().cpu().numpy()[0])}.npy', emb[3].detach().cpu().numpy())
         return None
         '''
         pre_mag = np.concatenate(pre_mag_list, -1).T
@@ -187,10 +188,11 @@ class Separator(object):
             )
             estimates[name] = pre_audio.T
 
-        track = self.loaders['test'].mus.tracks[track_id]
-        scores = museval.eval_mus_track(track, estimates)
-        print(scores)
-        return scores
+        sf.write(f'{track_id}_vocals.wav', estimates['vocals'], 44100)
+        #track = self.loaders['test'].mus.tracks[track_id]
+        #scores = museval.eval_mus_track(track, estimates)
+        #print(scores)
+        #return scores
         return None
         
 

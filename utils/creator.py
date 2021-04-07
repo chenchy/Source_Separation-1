@@ -2,7 +2,7 @@ from dataloader.musdb_loader import MUSDBDataset
 from dataloader.slakh_loader import SlakhDataset
 
 from utils.augmentation import Compose
-from model import tcn, open_unmix, Unet, spleeter, tfc_tdf
+from model import tcn, open_unmix, Unet, spleeter, tfc_tdf, x_umix
 import torch
 from utils.augmentation import Compose, _augment_gain, _augment_channelswap, _augment_pitchShift
 from model.preprocess import STFT
@@ -38,6 +38,16 @@ def model_creator(hparams):
 
     if hparams.model_name == 'tfc_tdf':
         model = tfc_tdf.TFC_TDF(24, 5, 24, 3, 3, 2048)
+
+    if hparams.model_name == 'x_umix':
+        model == x_umix.OpenUnmix(nb_channels=2,
+                                    hidden_size=hparams.n_features, 
+                                    n_fft=hparams.n_fft, 
+                                    n_hop=hparams.hop_length,
+                                    input_mean=hparams.mean,
+                                    input_scale=hparams.std,
+                                    max_bin=hparams.max_bin,
+                                    sample_rate=hparams.sample_rate)
 
     return model
 

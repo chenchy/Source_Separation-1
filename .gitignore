@@ -3,3 +3,5 @@ logger/
 eval_dir/
 tmp/
 tmp_ori/
+tmp_emb/
+pic/

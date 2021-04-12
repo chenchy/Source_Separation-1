@@ -22,7 +22,7 @@ class Separator(object):
         super().__init__()
 
         self.hparams = hparams
-        self.use_device = 'cpu' #str("cuda" if torch.cuda.is_available() else "cpu")
+        self.use_device = str("cuda" if torch.cuda.is_available() else "cpu")
 
         # dataset
         self.train_set, self.val_set = self._get_data_loader('train'), self._get_data_loader('valid')

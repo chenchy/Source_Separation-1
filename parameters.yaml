@@ -19,7 +19,7 @@ aug_gain: True # use random volum adjust
 aug_channelswap: True # use channel swap
 aug_pitchShift: False # use pitch swift
 aug_freqmask: False
-use_emb: True
+use_emb: False
 
 # output
 save_path: 'logger/' # path to store the output model
@@ -41,7 +41,7 @@ sample_rate: 44100
 band_width: 16000
 
 # model_name
-model_name: 'spleeter' # tcn / unet / open-unmix / spleeter / tfc_tdf
+model_name: 'x_umix' # tcn / unet / open-unmix / spleeter / tfc_tdf / x_umix
 kernal_size: 3 # numbers of kernal, only useful when model_name equals tcn
 n_blocks: 8 # numbers of dilated blocks, only useful when model_name equals tcn
 n_stacks: 3 # numbers of repeated blocks, only useful when model_name equals tcn

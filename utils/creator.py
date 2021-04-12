@@ -1,11 +1,11 @@
 from dataloader.musdb_loader import MUSDBDataset
 from dataloader.slakh_loader import SlakhDataset
 
-from utils.augmentation import Compose
 from model import tcn, open_unmix, Unet, spleeter, tfc_tdf, x_umix
 import torch
 from utils.augmentation import Compose, _augment_gain, _augment_channelswap, _augment_pitchShift
 from model.preprocess import STFT
+from utils.general_utils import sdr_loss_core
 
 def preprocess_creator(hparams):
 
@@ -15,7 +15,7 @@ def preprocess_creator(hparams):
     return preprocess
 
 
-def model_creator(hparams):
+def model_creator(hparams, device):
     if hparams.model_name == 'tcn':
         model = tcn.tcn(hparams.max_bin, hparams.n_features, hparams.n_fft//2+1,
                     hparams.kernal_size, hparams.n_stacks, hparams.n_blocks, hparams.max_bin)
@@ -40,14 +40,15 @@ def model_creator(hparams):
         model = tfc_tdf.TFC_TDF(24, 5, 24, 3, 3, 2048)
 
     if hparams.model_name == 'x_umix':
-        model == x_umix.OpenUnmix(nb_channels=2,
+        model = x_umix.OpenUnmix(nb_channels=2,
                                     hidden_size=hparams.n_features, 
                                     n_fft=hparams.n_fft, 
                                     n_hop=hparams.hop_length,
                                     input_mean=hparams.mean,
                                     input_scale=hparams.std,
                                     max_bin=hparams.max_bin,
-                                    sample_rate=hparams.sample_rate)
+                                    sample_rate=hparams.sample_rate,
+                                    device=device)
 
     return model
 
@@ -61,6 +62,9 @@ def loss_creator(loss_name):
 
     elif loss_name == 'cosEmb':
         loss_func = torch.nn.CosineEmbeddingLoss(reduction='none')
+
+    elif loss_name == 'sdr':
+        loss_func == sdr_loss_core()
 
     return loss_func
 

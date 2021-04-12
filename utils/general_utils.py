@@ -159,3 +159,34 @@ def target_to_midi_number(target):
         numbers = np.arange(33, 40)
 
     return numbers
+
+def sdr_loss_core(input, gt, mix, weighted=True):
+    assert input.shape == gt.shape # (Batch, Len)
+    assert mix.shape == gt.shape   # (Batch, Len)
+
+    input = input[:, 200:-200]
+    gt = gt[:, 200:-200]
+    mix = mix[:, 200:-200]
+
+    ns = mix - gt
+    ns_hat = mix - input
+
+    if weighted:
+        alpha = torch.sum((gt*gt), 1, keepdims=True) / (torch.sum((gt*gt), 1,
+                                                          keepdims=True) + torch.sum((ns*ns), 1, keepdims=True) + 1e-10)
+    else:
+        alpha = 0.5
+
+    # Target
+    num_cln = torch.sum((input*gt), 1, keepdims=True)
+    denom_cln = ((1e-10 + torch.sum((input*input), 1, keepdims=True))
+                 ** 0.5) * ((1e-10 + torch.sum((gt*gt), 1, keepdims=True)) ** 0.5)
+    sdr_cln = num_cln / (denom_cln + 1e-10)
+
+    # Noise
+    num_noise = torch.sum((ns*ns_hat), 1, keepdims=True)
+    denom_noise = ((1e-10 + torch.sum((ns_hat*ns_hat), 1, keepdims=True))
+                   ** 0.5) * ((1e-10 + torch.sum((ns*ns), 1, keepdims=True)) ** 0.5)
+    sdr_noise = num_noise / (denom_noise + 1e-10)
+
+    return torch.mean(-alpha*sdr_cln - (1. - alpha)*sdr_noise)

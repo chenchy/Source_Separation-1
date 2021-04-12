@@ -237,4 +237,4 @@ class OpenUnmix(nn.Module):
         # since our output is non-negative, we can apply RELU
         x = F.relu(x).permute(1, 2, 3, 0) * mix
 
-        return x
+        return x, None

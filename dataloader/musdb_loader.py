@@ -74,11 +74,11 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 audio_sources.append(audio)
 
                 vgg_start = int(np.round(track.chunk_start))
-                vgg.append(torch.tensor(np.load(f'../data/MUSDB18-HQ/vggish/{track.name}.npy')[vgg_start:vgg_start+6], dtype=self.dtype))
+                #vgg.append(torch.tensor(np.load(f'../data/MUSDB18-HQ/vggish/{track.name}_{source}.npy')[vgg_start:vgg_start+6], dtype=self.dtype))
 
             # create stem tensor of shape (source, channel, samples)
             stems = torch.stack(audio_sources, dim=0)
-            vgg = torch.stack(vgg, dim=0)
+            #vgg = torch.stack(vgg, dim=0)
             # # apply linear mix over source index=0
             x = stems.sum(0)
             # get the target stem
@@ -90,7 +90,7 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 # apply time domain subtraction
                 y = x - stems[vocind]
             
-            return x, y, index // self.samples_per_track, vgg
+            return x, y, index // self.samples_per_track, np.array(vgg)
 
         # for validation and test, we deterministically yield the full
         # pre-mixed musdb track
@@ -100,6 +100,15 @@ class MUSDBDataset(torch.utils.data.Dataset):
                 track.audio.T,
                 dtype=self.dtype
             )
+            '''
+            y = []
+            for k, source in enumerate(self.mus.setup['sources']):
+                y.append(torch.tensor(
+                    track.targets[self.target].audio.T,
+                    dtype=self.dtype
+                ))
+            y = torch.stack(y, dim=0)
+            '''
             y = torch.tensor(
                 track.targets[self.target].audio.T,
                 dtype=self.dtype

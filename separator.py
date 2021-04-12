@@ -12,6 +12,7 @@ from utils.general_utils import get_statistics, bandwidth_to_max_bin, EarlyStopp
 from utils.augmentation import _augment_freq_masking
 import tqdm
 import soundfile as sf
+import time
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
@@ -21,7 +22,7 @@ class Separator(object):
         super().__init__()
 
         self.hparams = hparams
-        self.use_device = str("cuda" if torch.cuda.is_available() else "cpu")
+        self.use_device = 'cpu' #str("cuda" if torch.cuda.is_available() else "cpu")
 
         # dataset
         self.train_set, self.val_set = self._get_data_loader('train'), self._get_data_loader('valid')
@@ -31,16 +32,19 @@ class Separator(object):
         hparams.mean, hparams.std = self._get_mean_std()
         hparams.max_bin = bandwidth_to_max_bin(self.hparams.sample_rate, self.hparams.n_fft, self.hparams.band_width)
 
-        self.model = model_creator(hparams).to(self.use_device)
+        self.model = model_creator(hparams, self.use_device).to(self.use_device)
+   
         self.loss_func = loss_creator(hparams.loss_name)
+        if self.hparams.model_name:
+            self.sdr_loss = loss_creator
 
         self.optimizer, self.scheduler = self._configure_optimizers()
         self.es = EarlyStopping(patience=hparams.early_stopping_patience)
 
-        self.transform#.to(self.use_device)
+        self.transform.to(self.use_device)
 
-        if self.hparams.use_emb:
-            self.emb_loss = loss_creator('cosEmb')
+        #if self.hparams.use_emb:
+        self.emb_loss = loss_creator('cosEmb')
         
 
     def forward(self, batch, partition):
@@ -51,13 +55,15 @@ class Separator(object):
         if partition == 'va':
             mix_audio, tar_audio = batch
             batch_size = mix_audio.shape[0]
-            mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // 8) * 8]
-            tar_audio = tar_audio[..., :int(tar_audio.shape[-1] // 8) * 8]
-            mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, 2).permute(0, 2, 1)
-            tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * 8, -1, 2).permute(0, 2, 1)
+            c_size = 8
+            mix_audio = mix_audio[..., :int(mix_audio.shape[-1] // c_size) * c_size]
+            tar_audio = tar_audio[..., :int(tar_audio.shape[-1] // c_size) * c_size] #batch, sources, channel, time
+            mix_audio = mix_audio.permute(0, 2, 1).reshape(batch_size * c_size, -1, 2).permute(0, 2, 1)
+            tar_audio = tar_audio.permute(0, 2, 1).reshape(batch_size * c_size, -1, 2).permute(0, 2, 1)
+            vgg = None
         else:
             mix_audio, tar_audio, vgg = batch
-            vgg = torch.repeat_interleave(vgg, torch.tensor([5, 5, 5, 5, 5, 6]).to(self.use_device), dim=2).permute(1, 0, 2, 3).reshape(4, -1, 128)
+            #vgg = torch.repeat_interleave(vgg, torch.tensor([5, 5, 5, 5, 5, 6]).to(self.use_device), dim=2).permute(1, 0, 2, 3).reshape(4, -1, 128)
         if len(tar_audio.shape) == 4:
             tar_audio = tar_audio[:,:].reshape(-1, tar_audio.shape[2], tar_audio.shape[3])
         mix_stft = self.transform(mix_audio)
@@ -71,7 +77,7 @@ class Separator(object):
             mix_mag = _augment_freq_masking(mix_mag)
 
         if self.hparams.use_emb and partition=='tr':
-            pre_mag, emb = self.model(mix_mag, mix_mag_detach, tar_mag)
+            pre_mag, emb = self.model(mix_mag, mix_mag_detach)
             emb_loss_neg = 0
             emb_loss_pos = 0
             feature_num = emb[0].shape[0]
@@ -107,28 +113,58 @@ class Separator(object):
             return (loss, emb_loss_pos, emb_loss_neg)
 
         else:
-            pre_mag, _ = self.model(mix_mag, mix_mag_detach, tar_mag)
+            pre_mag, emb = self.model(mix_mag, mix_mag_detach, vgg)
+            emb_loss_neg = 0
+            if self.hparams.model_name == 'x_umix':
+                if partition == 'tr':
+                    tar_mag = tar_mag.reshape(pre_mag.shape)
+                    loss = [self.loss_func(pre_mag[:,0], tar_mag[:,0]),
+                             self.loss_func(pre_mag[:,1], tar_mag[:,1]),
+                             self.loss_func(pre_mag[:,2], tar_mag[:,2]),
+                             self.loss_func(pre_mag[:,3], tar_mag[:,3])]
 
-            loss += self.loss_func(pre_mag, tar_mag)
+                   
+                    emb = [e.reshape(-1, e.shape[-1]) for e in emb]
+                    feature_num = emb[0].shape[0]
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[2], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    loss.append(emb_loss_neg)
+                
+                else:
+                    loss = self.loss_func(pre_mag[:,0], tar_mag)
+            else:
+                loss += self.loss_func(pre_mag, tar_mag)
+            #if self.hparams.model_name == 'x_umix':
+            #    x_theta = F.atan2(mix_stft[..., 0], mix_stft[..., 1])
+
+            #    torch.istft(inp, self.hparams.n_fft, self.hparams.hop_length, torch.hann_window(self.hparams.n_fft))
 
             return loss
 
     def training_step(self):
         losses = AverageMeter()
-        emb_pos_losses = AverageMeter()
-        emb_neg_losses = AverageMeter()
+        #emb_pos_losses = AverageMeter()
+        #emb_neg_losses = AverageMeter()
+        st = time.time()
         self.model.train()
         pbar = tqdm.tqdm(self.train_set, disable=False)
         for x, y, _, vgg in pbar:
             x, y, vgg = x.to(self.use_device), y.to(self.use_device), vgg.to(self.use_device)
             self.optimizer.zero_grad()
-            loss, emb_loss_pos, emb_loss_neg = self.forward((x, y, vgg), 'tr')
-            loss.backward()
+            #loss, emb_loss_pos, emb_loss_neg = self.forward((x, y, vgg), 'tr')
+            loss = self.forward((x, y, vgg), 'tr')
+            total_loss = sum(loss[:4]) / 4 + loss[-1]
+            total_loss.backward()
             self.optimizer.step()
-            losses.update(loss.item(), x.shape[1])
+            losses.update(total_loss.item(), x.shape[1])
             #emb_pos_losses.update(emb_loss_pos.item(), x.shape[1])
-            emb_neg_losses.update(emb_loss_neg.item(), x.shape[1])
-        return losses.avg, emb_pos_losses.avg, emb_neg_losses.avg
+            #emb_neg_losses.update(emb_loss_neg.item(), x.shape[1])
+            pbar.set_postfix({'emb': loss[-1].item(), 'vocals': loss[0].item(), 'drums': loss[1].item(), 'bass': loss[2].item(), 'other': loss[3].item()})
+        return losses.avg#, emb_pos_losses.avg, emb_neg_losses.avg
 
 
     def validation_step(self):
@@ -148,13 +184,14 @@ class Separator(object):
         import numpy as np
 
         self.model.eval()
+        self.model = self.model.to(self.use_device)
 
         mix_stft = self.transform(mix_audio)
         mix_mag = mix_stft.pow(2).sum(-1).pow(1 / 2.0)
 
         #pre_mag = self.model(mix_mag, mix_mag.detach().clone())
         pre_mag_list = []
-        chunk_size = int(mix_mag.shape[-1] // 15) + 1
+        chunk_size = int(mix_mag.shape[-1] // 2) + 1
         for i in range(mix_mag.shape[-1] // chunk_size + 1):
             inp = mix_mag[..., i * chunk_size : (i + 1) * chunk_size].to(self.use_device)
             oup, emb = self.model(inp, inp.detach(), inp)
@@ -171,12 +208,14 @@ class Separator(object):
 
         mix_stft = mix_stft.squeeze().detach().cpu().numpy()
         mix_stft = mix_stft[..., 0] + mix_stft[..., 1]*1j
-        pre_residual = mix_mag.squeeze().permute(2, 1, 0).detach().cpu().numpy() - pre_mag
-        pre_stft = np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1) * np.exp(1j*np.angle(np.transpose(mix_stft, (2, 1, 0))[..., None]))
+        pre_stft = norbert.wiener(pre_mag, mix_stft.T.astype(np.complex128), 1, use_softmask=False)
+        #pre_residual = mix_mag.squeeze().permute(2, 1, 0).detach().cpu().numpy() - pre_mag
+        #pre_stft = np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1) * np.exp(1j*np.angle(np.transpose(mix_stft, (2, 1, 0))[..., None]))
         #pre_stft = norbert.wiener(np.concatenate((pre_mag[..., None], pre_residual[..., None]), -1), 
         #                          mix_stft.T.astype(np.complex128), 1, use_softmask=False)
         estimates = {}
-        names = ['vocals', 'accompaniment']
+        #names = ['vocals', 'accompaniment']
+        names = ['vocals', 'drums', 'bass', 'other']
         for i, name in enumerate(names):
 
             t, pre_audio = scipy.signal.istft(
@@ -188,12 +227,12 @@ class Separator(object):
             )
             estimates[name] = pre_audio.T
 
-        sf.write(f'{track_id}_vocals.wav', estimates['vocals'], 44100)
-        #track = self.loaders['test'].mus.tracks[track_id]
-        #scores = museval.eval_mus_track(track, estimates)
-        #print(scores)
-        #return scores
-        return None
+        #sf.write(f'{track_id}_vocals.wav', estimates['vocals'], 44100)
+        track = self.loaders['test'].mus.tracks[track_id]
+        scores = museval.eval_mus_track(track, estimates)
+        print(scores)
+        return scores
+        #return None
         
 
     def _configure_optimizers(self):

@@ -1,92 +1,30 @@
-from torch.nn import LSTM, Linear, BatchNorm1d, Parameter, Tanh, ReLU
+from torch.nn import LSTM, Linear, BatchNorm1d, Parameter, Tanh, ReLU, Identity
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class STFT(nn.Module):
-    def __init__(
-        self,
-        n_fft=4096,
-        n_hop=1024,
-        center=False
-    ):
-        super(STFT, self).__init__()
-        self.window = nn.Parameter(
-            torch.hann_window(n_fft),
-            requires_grad=False
-        )
-        self.n_fft = n_fft
-        self.n_hop = n_hop
-        self.center = center
+class NoOp(nn.Module):
+    def __init__(self):
+        super().__init__()
 
     def forward(self, x):
-        """
-        Input: (nb_samples, nb_channels, nb_timesteps)
-        Output:(nb_samples, nb_channels, nb_bins, nb_frames, 2)
-        """
-
-        nb_samples, nb_channels, nb_timesteps = x.size()
-
-        # merge nb_samples and nb_channels for multichannel stft
-        x = x.reshape(nb_samples*nb_channels, -1)
-
-        # compute stft with parameters as close as possible scipy settings
-        stft_f = torch.stft(
-            x,
-            n_fft=self.n_fft, hop_length=self.n_hop,
-            window=self.window, center=self.center,
-            normalized=False, onesided=True,
-            pad_mode='reflect'
-        )
-
-        # reshape back to channel dimension
-        stft_f = stft_f.contiguous().view(
-            nb_samples, nb_channels, self.n_fft // 2 + 1, -1, 2
-        )
-        return stft_f
-
-
-class Spectrogram(nn.Module):
-    def __init__(
-        self,
-        power=1,
-        mono=True
-    ):
-        super(Spectrogram, self).__init__()
-        self.power = power
-        self.mono = mono
-
-    def forward(self, stft_f):
-        """
-        Input: complex STFT
-            (nb_samples, nb_bins, nb_frames, 2)
-        Output: Power/Mag Spectrogram
-            (nb_frames, nb_samples, nb_channels, nb_bins)
-        """
-        stft_f = stft_f.transpose(2, 3)
-        # take the magnitude
-        stft_f = stft_f.pow(2).sum(-1).pow(self.power / 2.0)
-
-        # downmix in the mag domain
-        if self.mono:
-            stft_f = torch.mean(stft_f, 1, keepdim=True)
-
-        # permute output for LSTM convenience
-        return stft_f.permute(2, 0, 1, 3)
+        return x
 
 class Layer(nn.Module):
-    def __init__(self, inp, oup, act='relu'):
-        super(Layer1, self).__init__()
+    def __init__(self, inp, oup, act=None):
+        super(Layer, self).__init__()
         if act == 'relu':
-            self.act = ReLU()
+            act = ReLU()
         elif act == 'tanh':
-            self.act = Tanh()
+            act = Tanh()
+        else:
+            act = NoOp()
         self.inp_features = inp
         self.oup_features = oup
         self.layer = nn.Sequential(
             Linear(inp, oup, bias=False),
             BatchNorm1d(oup),
-            self.act
+            act
         )
 
     def forward(self, x):
@@ -94,10 +32,10 @@ class Layer(nn.Module):
 
 class lstm(nn.Module):
     def __init__(self, hidden_size, nb_layers, unidirectional):
-        super(Layer1, self).__init__()
+        super(lstm, self).__init__()
         self.lstm = LSTM(
             input_size=hidden_size, 
-            hidden_size=hidden_size, 
+            hidden_size=hidden_size//2, 
             num_layers=nb_layers, 
             bidirectional=not unidirectional, 
             batch_first=False, 
@@ -122,7 +60,8 @@ class OpenUnmix(nn.Module):
         max_bin=None,
         unidirectional=False,
         power=1,
-        n_sources=4
+        n_sources=4,
+        device='cuda'
     ):
         """
         Input: (nb_samples, nb_channels, nb_timesteps)
@@ -142,15 +81,24 @@ class OpenUnmix(nn.Module):
 
         self.hidden_size = hidden_size
            
-        self.model_dict = {}
-        for n in n_sources:
-            self.model_dict[n]['input_mean'], self.model_dict[n]['input_scale'], self.model_dict[n]['output_mean'], self.model_dict[n]['output_scale'] = self.get_mean_val(input_mean, input_scale)
+        
+        self.model_dict = nn.ModuleDict()
+        self.param_dict = {}
+        for n in range(n_sources):
+            n = str(n)
+            self.model_dict[n] = nn.ModuleDict()
+            self.param_dict[n] = {}
+            self.param_dict[n]['input_mean'], self.param_dict[n]['input_scale'], self.param_dict[n]['output_mean'], self.param_dict[n]['output_scale'] = self.get_mean_val(input_mean, input_scale, device)
+            self.model_dict[n]['id'] = Identity()
             self.model_dict[n]['layer1'] = Layer(self.nb_bins*nb_channels, hidden_size, 'tanh')
-            self.model_dict[n]['lstm'] = lstm(hidden_size, nb_layers, bidirectional)
+            self.model_dict[n]['lstm'] = lstm(hidden_size, nb_layers, unidirectional)
             self.model_dict[n]['layer2'] = Layer(hidden_size*2, hidden_size, 'relu')
             self.model_dict[n]['layer3'] = Layer(hidden_size, self.nb_output_bins*nb_channels)
+        #self.layer2 = Layer(hidden_size*2, hidden_size, 'relu')
+        #self.layer3 = Layer(hidden_size, self.nb_output_bins*nb_channels)
+        #self.emb = nn.Linear(128, 1024)
 
-    def get_mean_val(input_mean, input_scale):
+    def get_mean_val(self, input_mean, input_scale, device='cuda'):
         if input_mean is not None:
             input_mean = torch.from_numpy(
                 -input_mean[:self.nb_bins]
@@ -174,33 +122,46 @@ class OpenUnmix(nn.Module):
         output_mean = Parameter(
             torch.ones(self.nb_output_bins).float()
         )
-        return input_mean, input_scale, output_mean, output_scale
+        return input_mean.to(device), input_scale.to(device), output_mean.to(device), output_scale.to(device)
 
-    def forward(self, x_mag, mix, x_pha):
+    def forward(self, x_mag, mix, vgg=None):
        
-        x = x.permute(3, 0, 1, 2)
+        x = x_mag.permute(3, 0, 1, 2)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
         # crop
         x = x[..., :self.nb_bins]
 
-        input_list = [x.copy(), x.copy(), x.copy(), x.copy()]
+        input_list = []
+        for i in range(self.n_sources):
+            input_list.append(self.model_dict[str(i)]['id'](x))
 
         # shift and scale input to mean=0 std=1 (across all bins)
         for i in range(self.n_sources):
-            input_list[i] += self.model_dict[i]['input_mean']
-            input_list[i] *= self.model_dict[i]['input_scale']
-            input_list[i] = self.model_dict[i]['layer1'](input_list[i].reshape(-1, nb_channels*self.nb_bins))
+            input_list[i] += self.param_dict[str(i)]['input_mean']
+            input_list[i] *= self.param_dict[str(i)]['input_scale']
+            input_list[i] = self.model_dict[str(i)]['layer1'](input_list[i].reshape(-1, nb_channels*self.nb_bins))
             input_list[i] = input_list[i].reshape(nb_frames, nb_samples, self.hidden_size)
 
-        cross_1 = (input_list[0] + input_list[1] + input_list[2] + input_list[4]) / 4.0
+        cross_1 = (input_list[0] + input_list[1] + input_list[2] + input_list[3]) / 4.0
 
+        lstm_oup = []
         for i in range(self.n_sources):
-            input_list[i] = torch.cat([input_list[i], self.model_dict[i]['lstm'](cross_1)[0]], -1)
-            input_list[i] = self.model_dict[i]['layer2'](input_list[i].reshape(-1, input_list[i].shape[-1]))
-            input_list[i] = self.model_dict[i]['layer3'](input_list[i]).reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)
-            input_list[i] *= self.model_dict[i]['output_scale']
-            input_list[i] += self.model_dict[i]['output_mean']
-            input_list[i] = F.relu(input_list[i]).permute(1, 2, 3, 0) * mix
+            lstm_oup.append(self.model_dict[str(i)]['lstm'](cross_1)[0])
+        
 
-        return input_list[i]
+        cross_2 = (lstm_oup[0] + lstm_oup[1] + lstm_oup[2] + lstm_oup[3]) / 4.0
+         
+        emb_oup = []
+        for i in range(self.n_sources):
+            emb_oup.append(torch.cat([input_list[i], cross_2], -1))
+            
+            #vgg_inp = self.emb(vgg[:, i]).repeat(1, 43, 1).permute(1, 0, 2)[1:-2]
+            input_list[i] = self.model_dict[str(i)]['layer2'](emb_oup[i].reshape(-1, emb_oup[i].shape[-1]))
+            input_list[i] = self.model_dict[str(i)]['layer3'](input_list[i]).reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)
+            input_list[i] *= self.param_dict[str(i)]['output_scale']
+            input_list[i] += self.param_dict[str(i)]['output_mean']
+            input_list[i] = (F.relu(input_list[i]).permute(1, 2, 3, 0) * mix).unsqueeze(1)
+        emb = emb_oup.copy()
+        return torch.cat(input_list, 1), emb
+      

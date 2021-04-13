@@ -19,7 +19,7 @@ def main(hparams, yaml_hparam):
     valid_losses = []
     best_epoch = 0
 
-    ckpt_path = os.path.join('logger', hparams.model_name+'_contrastive')
+    ckpt_path = os.path.join('logger', hparams.model_name)
     if not os.path.exists(ckpt_path):
         os.makedirs(ckpt_path)
 

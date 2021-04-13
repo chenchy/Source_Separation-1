@@ -35,13 +35,13 @@ class Separator(object):
         self.model = model_creator(hparams, self.use_device).to(self.use_device)
    
         self.loss_func = loss_creator(hparams.loss_name)
-        if self.hparams.model_name == 'x_umix':
-            self.sdr_loss = loss_creator('sdr')
+        #if self.hparams.model_name == 'x_umix':
+        #    self.sdr_loss = loss_creator('sdr')
 
         self.optimizer, self.scheduler = self._configure_optimizers()
         self.es = EarlyStopping(patience=hparams.early_stopping_patience)
 
-        self.transform#.to(self.use_device)
+        self.transform.to(self.use_device)
 
         #if self.hparams.use_emb:
         self.emb_loss = loss_creator('cosEmb')
@@ -123,7 +123,7 @@ class Separator(object):
                              self.loss_func(pre_mag[:,2], tar_mag[:,2]),
                              self.loss_func(pre_mag[:,3], tar_mag[:,3])]
 
-
+                    '''
                     emb = [e.reshape(-1, e.shape[-1]) for e in emb]
                     feature_num = emb[0].shape[0]
                     emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
@@ -133,7 +133,7 @@ class Separator(object):
                     emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
                     emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
                     loss.append(emb_loss_neg)
-              
+                    '''
                 else:
                     loss = self.loss_func(pre_mag[:,0], tar_mag)
                 '''
@@ -163,13 +163,13 @@ class Separator(object):
             self.optimizer.zero_grad()
             #loss, emb_loss_pos, emb_loss_neg = self.forward((x, y, vgg), 'tr')
             loss = self.forward((x, y, vgg), 'tr')
-            total_loss = sum(loss[:4]) / 4 + loss[-1]
+            total_loss = sum(loss[:4]) / 4 #+ loss[-1]
             total_loss.backward()
             self.optimizer.step()
             losses.update(total_loss.item(), x.shape[1])
             #emb_pos_losses.update(emb_loss_pos.item(), x.shape[1])
             #emb_neg_losses.update(emb_loss_neg.item(), x.shape[1])
-            pbar.set_postfix({'emb': loss[-1], 'vocals': loss[0].item(), 'drums': loss[1].item(), 'bass': loss[2].item(), 'other': loss[3].item()})
+            pbar.set_postfix({'vocals': loss[0].item(), 'drums': loss[1].item(), 'bass': loss[2].item(), 'other': loss[3].item()})
         return losses.avg#, emb_pos_losses.avg, emb_neg_losses.avg
 
 

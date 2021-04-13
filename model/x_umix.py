@@ -155,7 +155,8 @@ class OpenUnmix(nn.Module):
         emb_oup = []
         for i in range(self.n_sources):
             emb_oup.append(torch.cat([input_list[i], cross_2], -1))
-            
+
+        for i in range(self.n_sources):
             #vgg_inp = self.emb(vgg[:, i]).repeat(1, 43, 1).permute(1, 0, 2)[1:-2]
             input_list[i] = self.model_dict[str(i)]['layer2'](emb_oup[i].reshape(-1, emb_oup[i].shape[-1]))
             input_list[i] = self.model_dict[str(i)]['layer3'](input_list[i]).reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)

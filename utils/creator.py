@@ -64,7 +64,7 @@ def loss_creator(loss_name):
         loss_func = torch.nn.CosineEmbeddingLoss(reduction='none')
 
     elif loss_name == 'sdr':
-        loss_func == sdr_loss_core()
+        loss_func = sdr_loss_core
 
     return loss_func
 

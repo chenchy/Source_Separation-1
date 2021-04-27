@@ -5,6 +5,7 @@ from loguru import logger
 import numpy as np
 import torch.utils.data as data
 import torch.nn as nn
+import torch.nn.functional as F
 import os
 from utils.creator import dataset_creator, model_creator, preprocess_creator, loss_creator
 import museval
@@ -44,7 +45,8 @@ class Separator(object):
         self.transform.to(self.use_device)
 
         #if self.hparams.use_emb:
-        self.emb_loss = loss_creator('cosEmb')
+        self.emb_loss = loss_creator('cosEmb') # other
+        #self.emb_loss_2 = loss_creator('cosEmb', 0.1)
 
 
     def forward(self, batch, partition):
@@ -63,7 +65,7 @@ class Separator(object):
             vgg = None
         else:
             mix_audio, tar_audio, vgg = batch
-            #vgg = torch.repeat_interleave(vgg, torch.tensor([5, 5, 5, 5, 5, 6]).to(self.use_device), dim=2).permute(1, 0, 2, 3).reshape(4, -1, 128)
+            vgg = vgg.repeat(1, 1, 43, 1)[:, :, 1:-2].permute(1, 0, 2, 3).reshape(4, -1, 128)
         if len(tar_audio.shape) == 4:
             tar_audio = tar_audio[:,:].reshape(-1, tar_audio.shape[2], tar_audio.shape[3])
         mix_stft = self.transform(mix_audio)
@@ -115,6 +117,7 @@ class Separator(object):
         else:
             pre_mag, emb = self.model(mix_mag, mix_mag_detach, vgg)
             emb_loss_neg = 0
+            emb_loss_pos = 0
             if self.hparams.model_name == 'x_umix':
                 if partition == 'tr':
                     tar_mag = tar_mag.reshape(pre_mag.shape)
@@ -128,12 +131,32 @@ class Separator(object):
                     feature_num = emb[0].shape[0]
                     emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[1], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
                     emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
                     emb_loss_neg += torch.mean(self.emb_loss(emb[2], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
                     emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], emb[2], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
                     emb_loss_neg += torch.mean(self.emb_loss(emb[1], emb[3], -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
-                    loss.append(emb_loss_neg)
+                    #emb_loss_neg += torch.mean(F.cosine_embedding_loss(emb[2], emb[3], -torch.ones(feature_num).to(mix_mag.device), 0, reduction='none').view(mix_mag.shape[0], -1).sum(dim=-1))
+                    #emb_loss_neg += torch.mean(F.cosine_embedding_loss(emb[0], emb[3], -torch.ones(feature_num).to(mix_mag.device), 0, reduction='none').view(mix_mag.shape[0], -1).sum(dim=-1))
+                    #emb_loss_neg += torch.mean(F.cosine_embedding_loss(emb[1], emb[3], -torch.ones(feature_num).to(mix_mag.device), 0, reduction='none').view(mix_mag.shape[0], -1).sum(dim=-1))
+                    #print(emb_loss_neg)
                     '''
+                    #emb_loss_neg = emb_loss_neg * 0.01
+                    '''
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], vgg[1]/225, -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[1], vgg[2]/225, -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[2], vgg[3]/225, -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], vgg[3]/225, -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[0], vgg[2]/225, -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    emb_loss_neg += torch.mean(self.emb_loss(emb[1], vgg[3]/225, -torch.ones(feature_num).to(mix_mag.device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                    
+                    emb = [e.reshape(-1, e.shape[-1]) for e in emb]
+                    feature_num = emb[0].shape[0]
+                    for i in range(4):
+                        emb_loss_pos += 0.0001 * torch.mean(self.emb_loss(emb[i], vgg[i]/225, torch.ones(feature_num).to(self.use_device)).view(mix_mag.shape[0], -1).sum(dim=-1))
+                  
+                    '''
+                    #loss.append(emb_loss_neg * 0.01)
+                    
                 else:
                     loss = self.loss_func(pre_mag[:,0], tar_mag)
                 '''
@@ -165,6 +188,7 @@ class Separator(object):
             loss = self.forward((x, y, vgg), 'tr')
             total_loss = sum(loss[:4]) / 4 #+ loss[-1]
             total_loss.backward()
+
             self.optimizer.step()
             losses.update(total_loss.item(), x.shape[1])
             #emb_pos_losses.update(emb_loss_pos.item(), x.shape[1])

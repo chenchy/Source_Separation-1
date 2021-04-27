@@ -80,23 +80,25 @@ class OpenUnmix(nn.Module):
             self.nb_bins = self.nb_output_bins
 
         self.hidden_size = hidden_size
-           
+
+        self.bn = nn.BatchNorm1d(self.nb_bins)
         
         self.model_dict = nn.ModuleDict()
         self.param_dict = {}
         for n in range(n_sources):
             n = str(n)
             self.model_dict[n] = nn.ModuleDict()
-            self.param_dict[n] = {}
-            self.param_dict[n]['input_mean'], self.param_dict[n]['input_scale'], self.param_dict[n]['output_mean'], self.param_dict[n]['output_scale'] = self.get_mean_val(input_mean, input_scale, device)
+            self.param_dict[f'input_mean_{n}'], self.param_dict[f'input_scale_{n}'], self.param_dict[f'output_mean_{n}'], self.param_dict[f'output_scale_{n}'] = self.get_mean_val(input_mean, input_scale, device)
             self.model_dict[n]['id'] = Identity()
             self.model_dict[n]['layer1'] = Layer(self.nb_bins*nb_channels, hidden_size, 'tanh')
             self.model_dict[n]['lstm'] = lstm(hidden_size, nb_layers, unidirectional)
             self.model_dict[n]['layer2'] = Layer(hidden_size*2, hidden_size, 'relu')
             self.model_dict[n]['layer3'] = Layer(hidden_size, self.nb_output_bins*nb_channels)
+
+        self.param_dict = nn.ParameterDict(self.param_dict)
         #self.layer2 = Layer(hidden_size*2, hidden_size, 'relu')
         #self.layer3 = Layer(hidden_size, self.nb_output_bins*nb_channels)
-        #self.emb = nn.Linear(128, 1024)
+        #self.emb = nn.Conv1d(hidden_size*2, 128, 1)
 
     def get_mean_val(self, input_mean, input_scale, device='cuda'):
         if input_mean is not None:
@@ -122,10 +124,10 @@ class OpenUnmix(nn.Module):
         output_mean = Parameter(
             torch.ones(self.nb_output_bins).float()
         )
-        return input_mean.to(device), input_scale.to(device), output_mean.to(device), output_scale.to(device)
+        return input_mean, input_scale, output_mean, output_scale
 
     def forward(self, x_mag, mix, vgg=None):
-       
+
         x = x_mag.permute(3, 0, 1, 2)
         nb_frames, nb_samples, nb_channels, nb_bins = x.data.shape
 
@@ -138,8 +140,8 @@ class OpenUnmix(nn.Module):
 
         # shift and scale input to mean=0 std=1 (across all bins)
         for i in range(self.n_sources):
-            input_list[i] += self.param_dict[str(i)]['input_mean']
-            input_list[i] *= self.param_dict[str(i)]['input_scale']
+            input_list[i] += self.param_dict[f'input_mean_{str(i)}']
+            input_list[i] *= self.param_dict[f'input_scale_{str(i)}']
             input_list[i] = self.model_dict[str(i)]['layer1'](input_list[i].reshape(-1, nb_channels*self.nb_bins))
             input_list[i] = input_list[i].reshape(nb_frames, nb_samples, self.hidden_size)
 
@@ -148,7 +150,6 @@ class OpenUnmix(nn.Module):
         lstm_oup = []
         for i in range(self.n_sources):
             lstm_oup.append(self.model_dict[str(i)]['lstm'](cross_1)[0])
-        
 
         cross_2 = (lstm_oup[0] + lstm_oup[1] + lstm_oup[2] + lstm_oup[3]) / 4.0
          
@@ -160,9 +161,13 @@ class OpenUnmix(nn.Module):
             #vgg_inp = self.emb(vgg[:, i]).repeat(1, 43, 1).permute(1, 0, 2)[1:-2]
             input_list[i] = self.model_dict[str(i)]['layer2'](emb_oup[i].reshape(-1, emb_oup[i].shape[-1]))
             input_list[i] = self.model_dict[str(i)]['layer3'](input_list[i]).reshape(nb_frames, nb_samples, nb_channels, self.nb_output_bins)
-            input_list[i] *= self.param_dict[str(i)]['output_scale']
-            input_list[i] += self.param_dict[str(i)]['output_mean']
+            input_list[i] *= self.param_dict[f'output_scale_{str(i)}']
+            input_list[i] += self.param_dict[f'output_mean_{str(i)}']
             input_list[i] = (F.relu(input_list[i]).permute(1, 2, 3, 0) * mix).unsqueeze(1)
-        emb = emb_oup.copy()
+        
+        emb = []
+        for i in range(self.n_sources):
+            emb.append(emb_oup[i]) #.permute(1, 2, 0)).permute(2, 0, 1))
+        #emb = emb_oup.copy()
         return torch.cat(input_list, 1), emb
       

@@ -1,6 +1,6 @@
 # optimizer
 learning_rate: 0.001
-patience: 2 # wait how many epochs without updating will adjust the learning rate
+patience: 10 # wait how many epochs without updating will adjust the learning rate
 decay_factor: 0.3 # how many percent decrease for the learning rate each time
 weight_decay: 0.00001
 
@@ -8,7 +8,7 @@ weight_decay: 0.00001
 gradient_clip_val: 100 # maximum gradient value
 seed: 42 # random seed
 gpus: 1 # how many paralleled gpu for training
-early_stopping_patience: 10 # wait for how many epochs not updating before applying early stopping
+early_stopping_patience: 50 # wait for how many epochs not updating before applying early stopping
 batch_size: 16 # numbers of batch
 num_workers: 8 # numbers of workers for paralleled dataloader
 epochs: 1000 # maximum epochs

@@ -12,8 +12,8 @@ def main(args):
 
     test_set = model._get_data_loader('test')
     for mix_audio, tar_audio, track_id in tqdm.tqdm(test_set):
-    	score = model.test_step(mix_audio, tar_audio, track_id)
-    	results.add_track(score)
+     	score = model.test_step(mix_audio, tar_audio, track_id)
+     	results.add_track(score)
     
     print(results)
     method = museval.MethodStore()
